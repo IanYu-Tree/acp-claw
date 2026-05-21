@@ -13,6 +13,7 @@ export interface ActiveSession {
   client: AcpClient;
   busy: boolean;
   isNew: boolean;
+  promptPromise: Promise<void> | null;
 }
 
 export class SessionManager {
@@ -61,7 +62,7 @@ export class SessionManager {
 
     this.store.save(record);
 
-    const session: ActiveSession = { sessionKey, record, client, busy: false, isNew: true };
+    const session: ActiveSession = { sessionKey, record, client, busy: false, isNew: true, promptPromise: null };
 
     client.on('session-update', (sessionId: string, update: SessionUpdate) => {
       if (sessionId === acpSessionId) {
@@ -109,13 +110,42 @@ export class SessionManager {
 
     session.client.on('session-update', listener);
 
-    try {
-      await session.client.prompt(session.record.acpSessionId, parts);
-    } finally {
-      session.client.removeListener('session-update', listener);
-      session.busy = false;
-      session.record.lastActivityAt = Date.now();
-      this.store.save(session.record);
+    const acpSessionId = session.record.acpSessionId!;
+
+    const p = (async () => {
+      try {
+        await session.client.prompt(acpSessionId, parts);
+      } finally {
+        session.client.removeListener('session-update', listener);
+        session.busy = false;
+        session.promptPromise = null;
+        session.record.lastActivityAt = Date.now();
+        this.store.save(session.record);
+      }
+    })();
+
+    session.promptPromise = p;
+    await p;
+  }
+
+  /**
+   * Cancel the current prompt on a session.
+   * Returns a promise that resolves when the current prompt finishes.
+   */
+  async cancel(sessionKey: string): Promise<void> {
+    const session = this.sessions.get(sessionKey);
+    if (!session) return;
+    if (!session.busy || !session.record.acpSessionId) return;
+
+    session.client.cancel(session.record.acpSessionId);
+
+    // Wait for the current prompt to finish
+    if (session.promptPromise) {
+      try {
+        await session.promptPromise;
+      } catch {
+        // Ignore errors from cancelled prompt
+      }
     }
   }
 
@@ -199,6 +229,7 @@ export class SessionManager {
         client: null as unknown as AcpClient,
         busy: false,
         isNew: false,
+        promptPromise: null,
       });
     }
   }
