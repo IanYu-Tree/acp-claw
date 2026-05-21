@@ -30,6 +30,7 @@ No more context switching. Just message your agent and let it work.
 
 - **Long-Live Looping** — Daemon mode that never sleeps; always ready for your next instruction
 - **ACP Universal Adapter** — Connect to any agent that implements the [Agent Client Protocol](https://github.com/anthropics/agent-client-protocol)
+- **Scheduled Tasks (Cron)** — Set up cron-based scheduled tasks to trigger agents automatically
 - **Session Persistence** — Pick up conversations where you left off, even after restarts
 - **Memory System** — Your agent remembers project context, decisions, and preferences
 - **Slash Commands** — Quick actions via `/` commands in chat
@@ -136,6 +137,50 @@ Feishu Message → WebSocket → Controller → SessionManager → AcpClient →
 | `/memory` | View current session memory |
 | `/clear` | Clear current session context |
 | `/restart` | Restart the agent process |
+
+---
+
+## Scheduled Tasks (Cron)
+
+ACP Claw supports cron-based scheduled tasks that automatically trigger your agent at specified times.
+
+### CLI Commands
+
+```bash
+# Add a scheduled task
+acp-claw cron add --name "daily-standup" --schedule "0 9 * * 1-5" --prompt "Generate a standup summary"
+
+# List all tasks
+acp-claw cron list
+
+# Enable/disable a task
+acp-claw cron toggle --name "daily-standup" --enabled false
+
+# Delete a task
+acp-claw cron delete --name "daily-standup"
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--name` | Unique task name |
+| `--schedule` | Cron expression (5-field format) |
+| `--prompt` | Prompt sent to the agent when triggered |
+| `--chat-id` | (Optional) Target chat for the response |
+| `--one-shot` | (Optional) Auto-delete after first execution |
+
+### Cron Expression Examples
+
+| Expression | Meaning |
+|-----------|---------|
+| `*/5 * * * *` | Every 5 minutes |
+| `0 9 * * *` | Daily at 9:00 |
+| `0 9 * * 1-5` | Weekdays at 9:00 |
+| `30 18 * * 5` | Every Friday at 18:30 |
+| `0 0 1 * *` | First day of each month |
+
+Tasks are persisted to `.acp-claw/scheduler/tasks.json` and survive restarts. Changes to the file are hot-reloaded automatically.
 
 ---
 

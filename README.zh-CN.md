@@ -32,6 +32,7 @@ ACP Claw 就是为此而生的。它作为一个常驻守护进程运行：
 
 - **长生命周期守护进程** — 后台常驻，永不休眠，随时待命
 - **ACP 万能适配器** — 兼容任何实现了 [Agent Client Protocol](https://github.com/anthropics/agent-client-protocol) 的 AI Agent
+- **定时任务 (Cron)** — 通过 cron 表达式设置定时任务，自动触发 Agent 执行
 - **会话持久化** — 即使重启服务，也能无缝衔接之前的对话
 - **记忆系统** — Agent 会记住你的项目背景、技术决策和偏好
 - **斜杠命令** — 通过 `/` 命令快速控制 Agent 行为
@@ -138,6 +139,50 @@ graph LR
 | `/memory` | 查看当前会话记忆 |
 | `/clear` | 清空当前会话上下文 |
 | `/restart` | 重启 Agent 进程 |
+
+---
+
+## 定时任务 (Cron)
+
+ACP Claw 支持基于 cron 表达式的定时任务，到达指定时间时自动触发 Agent 执行。
+
+### CLI 命令
+
+```bash
+# 添加定时任务
+acp-claw cron add --name "daily-standup" --schedule "0 9 * * 1-5" --prompt "生成今日站会摘要"
+
+# 列出所有任务
+acp-claw cron list
+
+# 启用/禁用任务
+acp-claw cron toggle --name "daily-standup" --enabled false
+
+# 删除任务
+acp-claw cron delete --name "daily-standup"
+```
+
+### 参数说明
+
+| 参数 | 说明 |
+|------|------|
+| `--name` | 任务名称（唯一标识符） |
+| `--schedule` | Cron 表达式（5 字段格式） |
+| `--prompt` | 触发时发送给 Agent 的提示词 |
+| `--chat-id` | （可选）指定回复消息的聊天 ID |
+| `--one-shot` | （可选）执行一次后自动删除 |
+
+### Cron 表达式示例
+
+| 表达式 | 含义 |
+|--------|------|
+| `*/5 * * * *` | 每 5 分钟 |
+| `0 9 * * *` | 每天 9:00 |
+| `0 9 * * 1-5` | 工作日 9:00 |
+| `30 18 * * 5` | 每周五 18:30 |
+| `0 0 1 * *` | 每月 1 号 0:00 |
+
+任务数据持久化在 `.acp-claw/scheduler/tasks.json`，重启不丢失。文件修改后自动热重载。
 
 ---
 

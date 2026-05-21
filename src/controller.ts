@@ -2,17 +2,55 @@ import { FeishuChannel, type FeishuMessage } from './channel/feishu.js';
 import { SessionManager } from './session/manager.js';
 import { SessionStore } from './session/store.js';
 import { getSessionKey } from './session/router.js';
-import { buildPrompt } from './acp/prompt-builder.js';
+import { buildPrompt, formatUserMessage } from './acp/prompt-builder.js';
 import { parseSlashCommand } from './commands/parser.js';
 import { handleCommand } from './commands/handlers.js';
 import { type AcpClawConfig, readMemoryFile, isTemplateOnly } from './config.js';
 import { createLogger, type Logger } from './logger.js';
+import { CronService } from './cron/service.js';
+import type { ScheduledTask } from './cron/types.js';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import type { Lang } from './commands/i18n.js';
 
+export function buildInitialContext(workDir: string): string[] {
+  const files: string[] = [];
+  const dirs = [join(workDir, 'knowledge'), join(workDir, 'memory')];
+
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue;
+    try {
+      const entries = readdirSync(dir);
+      for (const entry of entries) {
+        if (entry.endsWith('.md')) {
+          files.push(join(dir, entry));
+        }
+      }
+    } catch {}
+  }
+
+  // Scan skills/*/SKILL.md
+  const skillsDir = join(workDir, 'skills');
+  if (existsSync(skillsDir)) {
+    try {
+      const skillFolders = readdirSync(skillsDir, { withFileTypes: true });
+      for (const folder of skillFolders) {
+        if (folder.isDirectory()) {
+          const skillFile = join(skillsDir, folder.name, 'SKILL.md');
+          if (existsSync(skillFile)) {
+            files.push(skillFile);
+          }
+        }
+      }
+    } catch {}
+  }
+
+  return files;
+}
+
 export class Controller {
   private feishuChannel?: FeishuChannel;
+  private cronService?: CronService;
   private sessionManager: SessionManager;
   private store: SessionStore;
   private config: AcpClawConfig;
@@ -57,6 +95,11 @@ export class Controller {
       console.log('⚠️  Feishu Channel not configured');
     }
 
+    // Start CronService
+    this.cronService = new CronService(this.workDir, (task) => this.handleCronTrigger(task));
+    this.cronService.start();
+    console.log('✅ CronService started');
+
     // Start periodic state saving
     this.saveInterval = setInterval(() => {
       this.saveState();
@@ -81,6 +124,7 @@ export class Controller {
     }
 
     this.saveState();
+    this.cronService?.stop();
     await this.feishuChannel?.stop();
     await this.sessionManager.closeAll();
   }
@@ -126,16 +170,11 @@ export class Controller {
         text = text.replace(new RegExp(`@${this.config.feishu.appName}\\s*`), '').trim();
       }
 
-      // 检查 session 是否正在处理中
+      // 检查 session 是否正在处理中，如果是则打断
       const existingSession = this.sessionManager.getSession(sessionKey);
       if (existingSession?.busy) {
-        const busyMsg = '⏳ 正在处理中，请等待当前任务完成';
-        if (msg.id) {
-          await this.feishuChannel?.reply(msg.id, busyMsg);
-        } else if (msg.chatId) {
-          await this.feishuChannel?.send(msg.chatId, busyMsg);
-        }
-        return;
+        console.log(`⚡ [interrupt] Cancelling current prompt on ${sessionKey}`);
+        await this.sessionManager.cancel(sessionKey);
       }
 
       // Ensure session exists, check if it's newly created
@@ -146,19 +185,18 @@ export class Controller {
       // 后续消息只传用户文本
       let parts: ReturnType<typeof buildPrompt>;
       if (isNewSession) {
-        const knowledgeDir = join(this.workDir, 'knowledge');
-        const memoryDir = join(this.workDir, 'memory');
-        const filePaths = this.getContextFiles(knowledgeDir, memoryDir);
+        const filePaths = this.getContextFiles();
 
         // 检测 memory 是否需要初始化引导
         const initGuidance = this.buildInitGuidance();
-        const promptText = initGuidance ? `${initGuidance}\n\n---\n\n用户消息: ${text}` : text;
+        const userMsg = formatUserMessage('feishu', msg.senderId, text);
+        const promptText = initGuidance ? `${initGuidance}\n\n---\n\n${userMsg}` : userMsg;
         parts = buildPrompt(promptText, filePaths);
 
         // 标记为非新 session，下次不再传 memory
         session.isNew = false;
       } else {
-        parts = buildPrompt(text);
+        parts = buildPrompt(formatUserMessage('feishu', msg.senderId, text));
       }
 
       // Log the prompt being sent
@@ -189,19 +227,12 @@ export class Controller {
       await this.sessionManager.prompt(sessionKey, parts, (update) => {
         if (update.sessionUpdate === 'agent_message_chunk' && update.content?.text) {
           textBuffer += update.content.text;
-          this.logger.info('agent-text', update.content.text);
         } else if (update.sessionUpdate && update.sessionUpdate !== 'agent_message_chunk') {
-          const toolInfo = update.title || update.kind || update.sessionUpdate;
-          const updateData = {
-            sessionUpdate: update.sessionUpdate,
-            title: update.title,
-            kind: update.kind,
-            status: update.status,
-            toolCallId: update.toolCallId,
-            rawInput: update.rawInput,
-            rawOutput: update.rawOutput,
-          };
-          this.logger.info('agent-tool', `[${sessionKey}] ${toolInfo}`, updateData);
+          // 收到非文本事件（tool call 等）时，先 flush 已累积的文本
+          if (textBuffer.trim()) {
+            flushBuffer();
+          }
+
           if (update.title) {
             let toolLog = `🔧 [tool] ${update.title}`;
             if (update.rawInput !== undefined) {
@@ -211,6 +242,7 @@ export class Controller {
               toolLog += ` | output: ${truncate(JSON.stringify(update.rawOutput), 300)}`;
             }
             console.log(toolLog);
+            this.logger.info('agent-tool', `[${sessionKey}] ${toolLog}`);
 
             // 转发工具调用到 channel（默认关闭，需配置 forwardToolMessages: true）
             if (this.config.forwardToolMessages) {
@@ -289,20 +321,89 @@ export class Controller {
     return guidance;
   }
 
-  private getContextFiles(knowledgeDir: string, memoryDir: string): string[] {
-    const files: string[] = [];
-    for (const dir of [knowledgeDir, memoryDir]) {
-      if (!existsSync(dir)) continue;
-      try {
-        const entries = readdirSync(dir);
-        for (const entry of entries) {
-          if (entry.endsWith('.md')) {
-            files.push(join(dir, entry));
+  private getContextFiles(): string[] {
+    return buildInitialContext(this.workDir);
+  }
+
+  private async handleCronTrigger(task: ScheduledTask): Promise<void> {
+    const sessionKey = `cron_${task.name}`;
+    console.log(`⏰ [cron] Triggered: "${task.name}" → session ${sessionKey}`);
+    this.logger.info('cron-trigger', `Task "${task.name}" triggered`, {
+      name: task.name,
+      schedule: task.schedule,
+      prompt: task.prompt,
+      chatId: task.chatId,
+      oneShot: task.oneShot,
+    });
+
+    try {
+      const session = await this.sessionManager.getOrCreate(sessionKey);
+      const isNewSession = session.isNew;
+
+      let parts: ReturnType<typeof buildPrompt>;
+      if (isNewSession) {
+        const filePaths = buildInitialContext(this.workDir);
+        const initGuidance = this.buildInitGuidance();
+        const promptText = initGuidance ? `${initGuidance}\n\n---\n\n${task.prompt}` : task.prompt;
+        parts = buildPrompt(promptText, filePaths);
+        session.isNew = false;
+      } else {
+        parts = buildPrompt(task.prompt);
+      }
+
+      let textBuffer = '';
+      let fullText = '';
+
+      const flushBuffer = () => {
+        if (!textBuffer || !textBuffer.trim()) {
+          textBuffer = '';
+          return;
+        }
+        const text = textBuffer;
+        textBuffer = '';
+        fullText += text;
+        console.log(`📝 [cron:${task.name}] ${text}`);
+        this.logger.info('agent-text-complete', `[${sessionKey}] ${text}`);
+      };
+
+      await this.sessionManager.prompt(sessionKey, parts, (update) => {
+        if (update.sessionUpdate === 'agent_message_chunk' && update.content?.text) {
+          textBuffer += update.content.text;
+        } else if (update.sessionUpdate && update.sessionUpdate !== 'agent_message_chunk') {
+          // 收到非文本事件时，先 flush 已累积的文本
+          if (textBuffer.trim()) {
+            flushBuffer();
+          }
+
+          if (update.title) {
+            let toolLog = `🔧 [tool] ${update.title}`;
+            if (update.rawInput !== undefined) {
+              toolLog += ` | input: ${truncate(JSON.stringify(update.rawInput), 300)}`;
+            }
+            if (update.rawOutput !== undefined) {
+              toolLog += ` | output: ${truncate(JSON.stringify(update.rawOutput), 300)}`;
+            }
+            console.log(toolLog);
+            this.logger.info('agent-tool', `[${sessionKey}] ${toolLog}`);
           }
         }
-      } catch {}
+      });
+
+      // prompt 结束后 flush 剩余文本
+      flushBuffer();
+
+      // Send result to feishu if chatId is configured
+      if (fullText.trim() && task.chatId && this.feishuChannel) {
+        await this.feishuChannel.send(task.chatId, fullText.trim());
+      }
+
+      console.log(`✅ [cron] Completed: "${task.name}"`);
+      this.logger.info('cron-complete', `Task "${task.name}" completed`);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error(`❌ [cron] Error executing "${task.name}":`, errMsg);
+      this.logger.error('cron-error', `[${sessionKey}] ${errMsg}`);
     }
-    return files;
   }
 
   private saveState(): void {
