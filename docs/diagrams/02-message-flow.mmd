@@ -1,0 +1,51 @@
+sequenceDiagram
+    participant U as 👤 用户<br/>(飞书)
+    participant C as 🦞 Claw<br/>(长驻服务)
+    participant A as 🤖 Agent<br/>(ACP 子进程)
+
+    Note over C: Long-Live Looping<br/>进程永不退出，持续监听
+
+    U->>C: 飞书消息 "帮我重构这段代码"
+    activate C
+    C->>C: parseSlashCommand() → 非命令
+    C->>C: getSessionKey("feishu", userId)
+    C->>C: sessionManager.getOrCreate()
+
+    alt 首次对话
+        C->>A: spawn Agent 子进程
+        C->>A: initialize (ACP 握手)
+        A-->>C: initialized (能力声明)
+        C->>A: session/new (创建 ACP Session)
+        A-->>C: sessionId
+        C->>C: 注入 memory + knowledge 文件
+    end
+
+    C->>A: session/prompt (用户消息)
+    activate A
+
+    loop Agent 工作循环
+        A-->>C: session/update (文本 chunk)
+        C->>C: debounce 500ms 缓冲
+
+        opt Agent 需要读/写文件
+            A->>C: fs/read_text_file
+            C-->>A: 文件内容
+        end
+
+        opt Agent 需要执行命令
+            A->>C: terminal/create
+            C-->>A: terminalId
+            A->>C: terminal/wait_for_exit
+            C-->>A: 执行结果
+        end
+    end
+
+    A-->>C: session/update (stopReason: endTurn)
+    deactivate A
+
+    C->>U: 飞书卡片回复（Markdown 渲染）
+    deactivate C
+
+    C->>C: saveState() 持久化
+
+    Note over C: 继续监听...<br/>随时待命

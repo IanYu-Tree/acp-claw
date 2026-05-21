@@ -1,0 +1,42 @@
+graph LR
+    subgraph Protocol["ACP 协议 = 万能适配器"]
+        direction TB
+        JSONRPC["JSON-RPC 2.0<br/>over stdio"]
+        Cap["能力声明<br/>fs + terminal"]
+        Stream["流式更新<br/>session/update"]
+    end
+
+    subgraph Before["传统方式 ❌"]
+        direction TB
+        B1["每个 Agent 一套 API"]
+        B2["不同的鉴权方式"]
+        B3["不同的消息格式"]
+        B4["切换成本极高"]
+    end
+
+    subgraph After["ACP Claw ✅"]
+        direction TB
+        A1["统一 ACP 接口"]
+        A2["一行配置切换"]
+        A3["标准化消息流"]
+        A4["即插即用"]
+    end
+
+    subgraph Ecosystem["一份配置，N 个 Agent"]
+        direction TB
+        Conf["config.json"]
+        Conf --> E1["codex: npx @zed-industries/codex-acp"]
+        Conf --> E2["claude: npx @agentclientprotocol/claude-agent-acp"]
+        Conf --> E3["gemini: gemini --acp"]
+        Conf --> E4["your-agent: your-agent --acp"]
+        Conf --> E5["你的 Agent: your-agent --acp"]
+    end
+
+    Before -->|"痛点"| Protocol
+    Protocol -->|"解决"| After
+    After --> Ecosystem
+
+    style Before fill:#FFEBEE,stroke:#C62828
+    style Protocol fill:#F3E5F5,stroke:#6A1B9A
+    style After fill:#E8F5E9,stroke:#2E7D32
+    style Ecosystem fill:#FFF3E0,stroke:#E65100

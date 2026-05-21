@@ -1,0 +1,47 @@
+graph TB
+    subgraph User["👤 用户"]
+        Feishu["飞书消息<br/>（任意设备）"]
+    end
+
+    subgraph Claw["🦞 ACP Claw — 永不停歇的 AI 助手"]
+        direction TB
+        WS["WebSocket 长连接<br/>（飞书 Channel）"]
+        Controller["Controller<br/>消息路由 + 编排"]
+        SM["Session Manager<br/>会话生命周期"]
+        Store["持久化存储<br/>sessions/*.json"]
+    end
+
+    subgraph ACP["🔌 ACP 协议层 — 万能适配器"]
+        direction TB
+        Client["AcpClient<br/>JSON-RPC 2.0 over stdio"]
+    end
+
+    subgraph Agents["🤖 Agent 生态（即插即用）"]
+        direction LR
+        Other["Other Agent"]
+        Codex["OpenAI Codex"]
+        Claude["Claude Code"]
+        Gemini["Google Gemini"]
+        Custom["自定义 Agent<br/>（任何支持 ACP 的）"]
+    end
+
+    Feishu -->|"消息"| WS
+    WS --> Controller
+    Controller --> SM
+    SM --> Store
+    SM --> Client
+    Client -->|"spawn + stdio"| Other
+    Client -->|"spawn + stdio"| Codex
+    Client -->|"spawn + stdio"| Claude
+    Client -->|"spawn + stdio"| Gemini
+    Client -->|"spawn + stdio"| Custom
+
+    Other -->|"stream 回复"| Client
+    Client -->|"session/update"| Controller
+    Controller -->|"飞书卡片"| WS
+    WS -->|"回复"| Feishu
+
+    style User fill:#E3F2FD,stroke:#1565C0
+    style Claw fill:#FFF3E0,stroke:#E65100
+    style ACP fill:#F3E5F5,stroke:#6A1B9A
+    style Agents fill:#E8F5E9,stroke:#2E7D32
