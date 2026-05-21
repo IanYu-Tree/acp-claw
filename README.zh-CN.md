@@ -5,7 +5,7 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.x-blue.svg)
 ![ACP](https://img.shields.io/badge/protocol-ACP-purple.svg)
 
-**永不下线的 AI 编程助手 —— 通过飞书消息驱动任意 AI Agent 写代码。**
+**Turn Any ACP Coding Agent into a Long-Lived Claw.**
 
 [English](./README.md) | 简体中文
 
@@ -176,6 +176,33 @@ npm run dev
 # 运行测试
 npm test
 ```
+
+---
+
+## 共建计划
+
+ACP Claw 目前仅支持 **飞书/Lark** 作为消息通道。我们急需社区力量共建更多 Channel！
+
+### 期望支持的 Channel
+
+| Channel | 状态 | 说明 |
+|---------|------|------|
+| 飞书/Lark | ✅ 已完成 | 已支持 |
+| WhatsApp | 🙏 急需共建 | WhatsApp Business API 集成 |
+| Slack | 🙏 急需共建 | Slack Bot Events API 集成 |
+| Discord | 🙏 急需共建 | Discord Bot 集成 |
+| Telegram | 🙏 急需共建 | Telegram Bot API 集成 |
+| 钉钉 | 🙏 急需共建 | 钉钉机器人 webhook/stream |
+| 企业微信 | 🙏 急需共建 | 企业微信机器人 |
+
+### 如何贡献一个 Channel
+
+1. 在 `src/channel/` 下新建文件（如 `src/channel/slack.ts`）
+2. 实现 Channel 接口（参考 `src/channel/feishu.ts`）
+3. 在 `src/controller.ts` 中注册
+4. 提交 PR！
+
+欢迎任何形式的贡献 —— 新 Channel、Bug 修复、文档完善或想法讨论。欢迎先开 Issue 交流。
 
 ---
 

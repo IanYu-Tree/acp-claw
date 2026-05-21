@@ -1,7 +1,7 @@
 {
   "name": "acp-claw",
   "version": "1.0.0",
-  "description": "Turn Any Coding Agent with ACP to Long live Claw",
+  "description": "Turn Any ACP Coding Agent into a Long-Lived Claw",
   "type": "module",
   "exports": {
     ".": {
