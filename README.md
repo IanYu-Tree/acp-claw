@@ -5,7 +5,7 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.x-blue.svg)
 ![ACP](https://img.shields.io/badge/protocol-ACP-purple.svg)
 
-**An always-on AI coding assistant daemon that connects Lark/Feishu to any AI agent via ACP.**
+**Turn Any ACP Coding Agent into a Long-Lived Claw.**
 
 English | [简体中文](./README.zh-CN.md)
 
@@ -174,6 +174,33 @@ npm run dev
 # Run tests
 npm test
 ```
+
+---
+
+## Contributing
+
+ACP Claw currently only supports **Lark/Feishu** as a message channel. We urgently need community contributions to bring more channels to life!
+
+### Wanted Channels
+
+| Channel | Status | Description |
+|---------|--------|-------------|
+| Lark/Feishu | ✅ Done | Already supported |
+| WhatsApp | 🙏 Help Wanted | WhatsApp Business API integration |
+| Slack | 🙏 Help Wanted | Slack Bot via Events API |
+| Discord | 🙏 Help Wanted | Discord Bot integration |
+| Telegram | 🙏 Help Wanted | Telegram Bot API |
+| DingTalk | 🙏 Help Wanted | DingTalk robot webhook/stream |
+| WeChat Work | 🙏 Help Wanted | WeCom (企业微信) bot |
+
+### How to Add a Channel
+
+1. Create a new file under `src/channel/` (e.g., `src/channel/slack.ts`)
+2. Implement the channel interface (refer to `src/channel/feishu.ts`)
+3. Register in `src/controller.ts`
+4. Submit a PR!
+
+All contributions are welcome — whether it's a new channel, bug fixes, docs, or ideas. Feel free to open an issue to discuss.
 
 ---
 
