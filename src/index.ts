@@ -1,6 +1,6 @@
 // ACP Claw - ACP protocol based client with Feishu channel
 
-export { Controller } from './controller.js';
+export { Controller } from './core/controller.js';
 export { AcpClient, type SessionUpdate } from './acp/client.js';
 export { buildPrompt, type ContentBlock } from './acp/prompt-builder.js';
 export { resolveAgent, listAgents } from './acp/agent-registry.js';

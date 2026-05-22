@@ -22,6 +22,16 @@ export interface AcpClawConfig {
   stateSaveIntervalMs?: number;
   forwardToolMessages?: boolean;
   language?: 'zh' | 'en';
+  reflexion?: {
+    enabled: boolean;
+    promptTemplate?: string;
+    minContentLength?: number;
+    layers?: {
+      memory: boolean;
+      skills: boolean;
+      knowledge: boolean;
+    };
+  };
 }
 
 const FALLBACK_AGENTS: Record<string, AgentConfig> = {
@@ -65,6 +75,7 @@ export function loadConfig(workDir: string): AcpClawConfig {
       sessionIdleTimeoutMs: parsed.sessionIdleTimeoutMs ?? DEFAULT_CONFIG.sessionIdleTimeoutMs,
       stateSaveIntervalMs: parsed.stateSaveIntervalMs ?? DEFAULT_CONFIG.stateSaveIntervalMs,
       language: parsed.language ?? 'zh',
+      reflexion: parsed.reflexion,
     };
   } catch {
     return { ...DEFAULT_CONFIG, defaultAgent: 'codex', agents: { ...FALLBACK_AGENTS } };
@@ -180,6 +191,7 @@ export function initWorkDir(workDir: string): AcpClawConfig {
     },
     sessionIdleTimeoutMs: DEFAULT_CONFIG.sessionIdleTimeoutMs,
     stateSaveIntervalMs: DEFAULT_CONFIG.stateSaveIntervalMs,
+    reflexion: { enabled: false },
   };
 
   // 如果已有配置文件，合并而非覆盖

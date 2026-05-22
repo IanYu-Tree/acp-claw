@@ -5,7 +5,7 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.x-blue.svg)
 ![ACP](https://img.shields.io/badge/protocol-ACP-purple.svg)
 
-**Turn Any ACP Coding Agent into a Long-Lived Claw.**
+**An always-on AI coding assistant daemon that connects Lark/Feishu to any AI agent via ACP.**
 
 English | [简体中文](./README.zh-CN.md)
 
@@ -30,9 +30,12 @@ No more context switching. Just message your agent and let it work.
 
 - **Long-Live Looping** — Daemon mode that never sleeps; always ready for your next instruction
 - **ACP Universal Adapter** — Connect to any agent that implements the [Agent Client Protocol](https://github.com/anthropics/agent-client-protocol)
+- **Session Resume/Load** — Automatically reconnects sessions via `resume > load > create` fallback strategy
+- **Multi-Session** — Run multiple sessions per user; create, switch, list, and delete sessions on the fly
 - **Scheduled Tasks (Cron)** — Set up cron-based scheduled tasks to trigger agents automatically
 - **Session Persistence** — Pick up conversations where you left off, even after restarts
 - **Memory System** — Your agent remembers project context, decisions, and preferences
+- **Reflexion Pipeline** — Auto-reflect on agent output for higher quality responses
 - **Slash Commands** — Quick actions via `/` commands in chat
 - **Multi-Agent Support** — Switch between different AI agents on the fly
 
@@ -134,9 +137,14 @@ Feishu Message → WebSocket → Controller → SessionManager → AcpClient →
 | `/help` | Show available commands |
 | `/status` | Check daemon and agent status |
 | `/agent <name>` | Switch to a different agent |
+| `/session new` | Create a new session |
+| `/session list` | List all sessions for current user |
+| `/session switch <id>` | Switch to a specific session |
+| `/session delete <id>` | Delete a session |
+| `/restart` | Restart the ACP client connection |
 | `/memory` | View current session memory |
 | `/clear` | Clear current session context |
-| `/restart` | Restart the agent process |
+| `/language <en\|zh>` | Switch response language |
 
 ---
 
@@ -219,33 +227,6 @@ npm run dev
 # Run tests
 npm test
 ```
-
----
-
-## Contributing
-
-ACP Claw currently only supports **Lark/Feishu** as a message channel. We urgently need community contributions to bring more channels to life!
-
-### Wanted Channels
-
-| Channel | Status | Description |
-|---------|--------|-------------|
-| Lark/Feishu | ✅ Done | Already supported |
-| WhatsApp | 🙏 Help Wanted | WhatsApp Business API integration |
-| Slack | 🙏 Help Wanted | Slack Bot via Events API |
-| Discord | 🙏 Help Wanted | Discord Bot integration |
-| Telegram | 🙏 Help Wanted | Telegram Bot API |
-| DingTalk | 🙏 Help Wanted | DingTalk robot webhook/stream |
-| WeChat Work | 🙏 Help Wanted | WeCom (企业微信) bot |
-
-### How to Add a Channel
-
-1. Create a new file under `src/channel/` (e.g., `src/channel/slack.ts`)
-2. Implement the channel interface (refer to `src/channel/feishu.ts`)
-3. Register in `src/controller.ts`
-4. Submit a PR!
-
-All contributions are welcome — whether it's a new channel, bug fixes, docs, or ideas. Feel free to open an issue to discuss.
 
 ---
 

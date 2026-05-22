@@ -14,6 +14,7 @@ export interface ControllerState {
   startedAt: number;
   lastActivityAt: number;
   activeSessions: string[];
+  activeSessionMap?: Record<string, string>;
 }
 
 export class SessionStore {

@@ -1,10 +1,11 @@
 import { listAgents } from '../acp/agent-registry.js';
 import { type AcpClawConfig, saveConfig } from '../config.js';
-import type { SessionManager } from '../session/manager.js';
+import { type SessionManager, parseSessionKey } from '../session/manager.js';
 import { t, type Lang } from './i18n.js';
 
 export interface CommandContext {
   sessionKey: string;
+  userPrefix: string;
   sessionManager: SessionManager;
   config: AcpClawConfig;
   isBusy: boolean;
@@ -31,6 +32,8 @@ export async function handleCommand(
       return handleStatus(ctx);
     case 'help':
       return handleHelp(lang);
+    case 'restart':
+      return handleRestart(ctx);
     case 'language':
       return handleLanguage(args, ctx);
     default:
@@ -71,26 +74,84 @@ async function handleSession(args: string[], ctx: CommandContext): Promise<Comma
     if (!session) {
       return { text: t('session.no_active', lang, { key: ctx.sessionKey }) };
     }
+    const connected = session.client ? '🟢' : '🔴';
+    const statusLine = session.client
+      ? ''
+      : '\n🔴 未连接（发送消息自动恢复）';
     return {
       text: [
-        `Session: ${session.sessionKey}`,
+        `${connected} Session: ${session.sessionKey}`,
         `Agent: ${session.record.agentName}`,
         `${t('session.info_created', lang)}: ${new Date(session.record.createdAt).toLocaleString()}`,
         `${t('session.info_last_activity', lang)}: ${new Date(session.record.lastActivityAt).toLocaleString()}`,
-      ].join('\n'),
+      ].join('\n') + statusLine,
     };
   }
 
   const sub = args[0];
+
   if (sub === 'new') {
     if (ctx.isBusy) {
       return { text: t('agent.busy', lang) };
     }
     const session = ctx.sessionManager.getSession(ctx.sessionKey);
     const agentName = session?.record.agentName ?? ctx.config.defaultAgent;
-    ctx.sessionManager.detach(ctx.sessionKey);
-    await ctx.sessionManager.getOrCreate(ctx.sessionKey, agentName);
-    return { text: t('session.new_created', lang, { agent: agentName }) };
+    const nextId = ctx.sessionManager.getNextSessionId(ctx.userPrefix);
+    const newKey = `${ctx.userPrefix}${nextId}`;
+    await ctx.sessionManager.getOrCreate(newKey, agentName);
+    ctx.sessionManager.setActiveSession(ctx.userPrefix, newKey);
+    return { text: `✅ 新建 session #${nextId}，已切换。` };
+  }
+
+  if (sub === 'list') {
+    const sessions = ctx.sessionManager.listByUser(ctx.userPrefix);
+    if (sessions.length === 0) {
+      return { text: '暂无 session。' };
+    }
+    const activeKey = ctx.sessionKey;
+    const lines = sessions.map((s) => {
+      const parsed = parseSessionKey(s.sessionKey);
+      const id = parsed?.sessionId ?? '?';
+      const marker = s.sessionKey === activeKey ? ' *' : '';
+      const busyTag = s.busy ? ' [busy]' : '';
+      const status = s.client ? '🟢' : '🔴';
+      return `  ${status} #${id} ${s.record.agentName}${busyTag}${marker}`;
+    });
+    return { text: `Sessions:\n${lines.join('\n')}` };
+  }
+
+  if (sub === 'switch') {
+    const targetId = args[1];
+    if (!targetId) {
+      return { text: '用法: /session switch <id>' };
+    }
+    const targetKey = `${ctx.userPrefix}${targetId}`;
+    const targetSession = ctx.sessionManager.getSession(targetKey);
+    if (!targetSession) {
+      return { text: `Session #${targetId} 不存在。使用 /session list 查看可用列表。` };
+    }
+    ctx.sessionManager.setActiveSession(ctx.userPrefix, targetKey);
+    return { text: `✅ 已切换到 session #${targetId}。` };
+  }
+
+  if (sub === 'delete') {
+    const targetId = args[1];
+    if (!targetId) {
+      return { text: '用法: /session delete <id>' };
+    }
+    const targetKey = `${ctx.userPrefix}${targetId}`;
+    const targetSession = ctx.sessionManager.getSession(targetKey);
+    if (!targetSession) {
+      return { text: `Session #${targetId} 不存在。使用 /session list 查看可用列表。` };
+    }
+    if (targetSession.busy) {
+      return { text: `Session #${targetId} 正忙，请等待完成后再删除。` };
+    }
+    if (targetKey === ctx.sessionKey) {
+      return { text: `不能删除当前活跃的 session。请先 /session switch 到其他 session。` };
+    }
+    await ctx.sessionManager.close(targetKey);
+    return { text: `✅ Session #${targetId} 已删除。` };
   }
 
   return { text: t('session.unknown_sub', lang, { sub }) };
@@ -115,14 +176,27 @@ function handleStatus(ctx: CommandContext): CommandResult {
   };
 }
 
+async function handleRestart(ctx: CommandContext): Promise<CommandResult> {
+  if (ctx.isBusy) {
+    return { text: '当前 session 正忙，请稍后再试。' };
+  }
+  await ctx.sessionManager.restart(ctx.sessionKey);
+  return { text: '✅ ACP client 已重启。' };
+}
+
 function handleHelp(lang: Lang): CommandResult {
   return {
     text: [
       t('help.title', lang),
       t('help.agent', lang),
       t('help.session', lang),
+      '  /session new - 创建新 session',
+      '  /session list - 查看 session 列表',
+      '  /session switch <id> - 切换 session',
+      '  /session delete <id> - 删除 session',
       t('help.status', lang),
       t('help.language', lang),
+      '  /restart - 重启 ACP client',
       t('help.help', lang),
     ].join('\n'),
   };
