@@ -2,10 +2,10 @@ import { resolveAgent } from '../acp/agent-registry.js';
 import { AcpClient, type SessionUpdate } from '../acp/client.js';
 import type { ContentBlock } from '../acp/prompt-builder.js';
 import type { AcpClawConfig } from '../config.js';
-import { getSessionKey } from './router.js';
-import { SessionStore, type SessionRecord } from './store.js';
+import { getSessionKey, getUserPrefix, parseSessionKey } from './router.js';
+import { type SessionRecord, SessionStore } from './store.js';
 
-export { getSessionKey };
+export { getSessionKey, getUserPrefix, parseSessionKey };
 
 export interface ActiveSession {
   sessionKey: string;
@@ -21,6 +21,7 @@ export class SessionManager {
   private config: AcpClawConfig;
   private store: SessionStore;
   private cwd: string;
+  private activeSessionMap = new Map<string, string>(); // userPrefix → active sessionKey
 
   constructor(config: AcpClawConfig, workDir: string) {
     this.config = config;
@@ -28,14 +29,19 @@ export class SessionManager {
     this.store = new SessionStore(`${workDir}/sessions`);
   }
 
-  async getOrCreate(sessionKey: string, agentName?: string): Promise<ActiveSession> {
+  async getOrCreate(
+    sessionKey: string,
+    agentName?: string,
+  ): Promise<ActiveSession> {
     const existing = this.sessions.get(sessionKey);
     // 如果 session 存在且 client 有效，直接返回
     if (existing && existing.client) return existing;
 
-    // 如果 session 存在但 client 为 null（从 restore 恢复），保留其 agentName 后清除旧记录
+    // 检查是否有可恢复的旧 record（从 restore 加载的）
+    let restoredRecord: SessionRecord | undefined;
     let restoredAgentName: string | undefined;
     if (existing && !existing.client) {
+      restoredRecord = existing.record;
       restoredAgentName = existing.record.agentName;
       this.sessions.delete(sessionKey);
     }
@@ -48,7 +54,23 @@ export class SessionManager {
 
     const client = new AcpClient(agentConfig.command, agentConfig.args ?? []);
     await client.start();
-    const acpSessionId = await client.createSession(this.cwd);
+
+    // Reconnect: 按 resume > load > create 优先级恢复 session
+    let acpSessionId: string;
+    if (restoredRecord?.acpSessionId) {
+      acpSessionId = await this.reconnectSession(
+        client,
+        restoredRecord.acpSessionId,
+      );
+    } else {
+      acpSessionId = await client.createSession(this.cwd);
+    }
+
+    if (!acpSessionId) {
+      throw new Error(
+        `Failed to obtain a valid acpSessionId for session: ${sessionKey}`,
+      );
+    }
 
     const now = Date.now();
     const record: SessionRecord = {
@@ -61,8 +83,18 @@ export class SessionManager {
     };
 
     this.store.save(record);
+    console.log(`[session] saved ${sessionKey} acpSessionId=${acpSessionId}`);
 
-    const session: ActiveSession = { sessionKey, record, client, busy: false, isNew: true, promptPromise: null };
+    const isReconnect = Boolean(restoredRecord);
+
+    const session: ActiveSession = {
+      sessionKey,
+      record,
+      client,
+      busy: false,
+      isNew: !isReconnect,
+      promptPromise: null,
+    };
 
     client.on('session-update', (sessionId: string, update: SessionUpdate) => {
       if (sessionId === acpSessionId) {
@@ -79,7 +111,8 @@ export class SessionManager {
     });
 
     client.on('close', () => {
-      this.sessions.delete(sessionKey);
+      // 不删除 session，保留 record 以便恢复
+      session.client = null as unknown as AcpClient;
     });
 
     this.sessions.set(sessionKey, session);
@@ -91,12 +124,14 @@ export class SessionManager {
     parts: ContentBlock[],
     onUpdate: (update: SessionUpdate) => void,
   ): Promise<void> {
-    const session = this.sessions.get(sessionKey);
+    let session = this.sessions.get(sessionKey);
     if (!session) {
       throw new Error(`No active session for key: ${sessionKey}`);
     }
-    if (!session.record.acpSessionId) {
-      throw new Error(`Session ${sessionKey} has no ACP session ID`);
+
+    // Auto-reconnect if session was restored but not yet connected
+    if (!session.client || !session.record.acpSessionId) {
+      session = await this.getOrCreate(sessionKey, session.record.agentName);
     }
 
     session.busy = true;
@@ -116,7 +151,9 @@ export class SessionManager {
       try {
         await session.client.prompt(acpSessionId, parts);
       } finally {
-        session.client.removeListener('session-update', listener);
+        if (session.client) {
+          session.client.removeListener('session-update', listener);
+        }
         session.busy = false;
         session.promptPromise = null;
         session.record.lastActivityAt = Date.now();
@@ -149,7 +186,10 @@ export class SessionManager {
     }
   }
 
-  async switchAgent(sessionKey: string, newAgent: string): Promise<ActiveSession> {
+  async switchAgent(
+    sessionKey: string,
+    newAgent: string,
+  ): Promise<ActiveSession> {
     this.detach(sessionKey);
     return this.getOrCreate(sessionKey, newAgent);
   }
@@ -197,10 +237,14 @@ export class SessionManager {
       setImmediate(async () => {
         try {
           if (acpSessionId) client.closeSession(acpSessionId);
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
         try {
           await client.shutdown();
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       });
     }
   }
@@ -208,6 +252,25 @@ export class SessionManager {
   async closeAll(): Promise<void> {
     const keys = [...this.sessions.keys()];
     await Promise.all(keys.map((key) => this.close(key)));
+  }
+
+  /**
+   * Shutdown all ACP client processes without deleting session records.
+   * Used during graceful shutdown to preserve session persistence for restart.
+   */
+  async shutdownAll(): Promise<void> {
+    const sessions = [...this.sessions.values()];
+    await Promise.all(
+      sessions.map(async (session) => {
+        if (!session.client) return;
+        try {
+          await session.client.shutdown();
+        } catch {
+          // Best effort: agent may have already exited
+        }
+        session.client = null as unknown as AcpClient;
+      }),
+    );
   }
 
   getSession(sessionKey: string): ActiveSession | undefined {
@@ -221,6 +284,9 @@ export class SessionManager {
   async restore(): Promise<void> {
     const records = this.store.list();
     for (const record of records) {
+      console.log(
+        `[session] restore: ${record.sessionKey} acpSessionId=${record.acpSessionId}`,
+      );
       // Store records in memory but do NOT reconnect.
       // Sessions will be recreated on next message via getOrCreate.
       this.sessions.set(record.sessionKey, {
@@ -232,24 +298,138 @@ export class SessionManager {
         promptPromise: null,
       });
     }
+
+    // 恢复 activeSessionMap
+    const state = this.store.loadControllerState();
+    if (state?.activeSessionMap) {
+      for (const [userPrefix, sessionKey] of Object.entries(
+        state.activeSessionMap,
+      )) {
+        this.activeSessionMap.set(userPrefix, sessionKey);
+      }
+    }
   }
 
   saveAll(): void {
     for (const session of this.sessions.values()) {
-      if (session.record.acpSessionId) {
-        this.store.save(session.record);
-      }
+      this.store.save(session.record);
     }
 
     const controllerState = {
       startedAt: Date.now(),
       lastActivityAt: Date.now(),
       activeSessions: [...this.sessions.keys()],
+      activeSessionMap: Object.fromEntries(this.activeSessionMap),
     };
     this.store.saveControllerState(controllerState);
   }
 
+  /**
+   * Get active session key for a user, defaults to session 1 if none set.
+   */
+  getActiveSessionKey(userPrefix: string): string {
+    const active = this.activeSessionMap.get(userPrefix);
+    if (active) return active;
+    // Default to session 1
+    const defaultKey = `${userPrefix}1`;
+    this.activeSessionMap.set(userPrefix, defaultKey);
+    return defaultKey;
+  }
+
+  /**
+   * Set the active session for a user.
+   */
+  setActiveSession(userPrefix: string, sessionKey: string): void {
+    this.activeSessionMap.set(userPrefix, sessionKey);
+  }
+
+  /**
+   * List all sessions for a user prefix.
+   */
+  listByUser(userPrefix: string): ActiveSession[] {
+    const results: ActiveSession[] = [];
+    for (const [key, session] of this.sessions) {
+      if (key.startsWith(userPrefix)) {
+        results.push(session);
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Get next available session ID for a user.
+   */
+  getNextSessionId(userPrefix: string): number {
+    let maxId = 0;
+    for (const key of this.sessions.keys()) {
+      if (key.startsWith(userPrefix)) {
+        const parsed = parseSessionKey(key);
+        if (parsed && parsed.sessionId > maxId) {
+          maxId = parsed.sessionId;
+        }
+      }
+    }
+    // Also check store for persisted sessions
+    const records = this.store.list();
+    for (const record of records) {
+      if (record.sessionKey.startsWith(userPrefix)) {
+        const parsed = parseSessionKey(record.sessionKey);
+        if (parsed && parsed.sessionId > maxId) {
+          maxId = parsed.sessionId;
+        }
+      }
+    }
+    return maxId + 1;
+  }
+
+  /**
+   * Restart ACP client for a session (close and recreate connection).
+   */
+  async restart(sessionKey: string): Promise<ActiveSession> {
+    const session = this.sessions.get(sessionKey);
+    const agentName = session?.record.agentName;
+    this.detach(sessionKey);
+    return this.getOrCreate(sessionKey, agentName);
+  }
+
   private emit(_session: ActiveSession, _update: SessionUpdate): void {
     // Internal event routing - updates are delivered via prompt() callback
+  }
+
+  /**
+   * 按 resume > load > create 优先级尝试恢复 session。
+   * 每一步失败自动 fallback 到下一步。
+   */
+  private async reconnectSession(
+    client: AcpClient,
+    oldSessionId: string,
+  ): Promise<string> {
+    // 1. 尝试 resume（最强恢复，保留完整对话上下文）
+    if (client.supportsResumeSession()) {
+      try {
+        const id = await client.resumeSession(oldSessionId, this.cwd);
+        console.log(`[session] resumeSession succeeded for ${oldSessionId}`);
+        return id;
+      } catch (err) {
+        console.warn(`[session] resumeSession failed:`, err);
+      }
+    }
+
+    // 2. 尝试 load（重新加载 session 状态）
+    if (client.supportsLoadSession()) {
+      try {
+        const id = await client.loadSession(oldSessionId, this.cwd);
+        console.log(`[session] loadSession succeeded for ${oldSessionId}`);
+        return id;
+      } catch (err) {
+        console.warn(`[session] loadSession failed:`, err);
+      }
+    }
+
+    // 3. Fallback: 创建新 session
+    console.warn(
+      `[session] all reconnect attempts failed for ${oldSessionId}, creating new session`,
+    );
+    return await client.createSession(this.cwd);
   }
 }

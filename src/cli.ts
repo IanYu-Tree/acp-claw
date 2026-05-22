@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 
-import { accessSync, constants as fsConstants, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { accessSync, constants as fsConstants, existsSync, readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { Command } from 'commander';
+import { fileURLToPath } from 'node:url';
 import { initWorkDir, loadConfig, resolveWorkDir } from './config.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkgJson = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
 
 const program = new Command();
 
 program
   .name('acp-claw')
   .description('ACP protocol based Claw client with Feishu channel')
-  .version('1.0.0')
+  .version(pkgJson.version)
   .option('--work-dir <path>', '工作目录路径');
 
 program
@@ -37,7 +41,7 @@ program
     const workDir = resolveWorkDir(program.opts().workDir);
     const config = loadConfig(workDir);
 
-    const { Controller } = await import('./controller.js');
+    const { Controller } = await import('./core/controller.js');
     const controller = new Controller(config, workDir);
     await controller.start();
   });

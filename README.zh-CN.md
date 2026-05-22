@@ -5,7 +5,7 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.x-blue.svg)
 ![ACP](https://img.shields.io/badge/protocol-ACP-purple.svg)
 
-**Turn Any ACP Coding Agent into a Long-Lived Claw.**
+**永不下线的 AI 编程助手 —— 通过飞书消息驱动任意 AI Agent 写代码。**
 
 [English](./README.md) | 简体中文
 
@@ -32,9 +32,12 @@ ACP Claw 就是为此而生的。它作为一个常驻守护进程运行：
 
 - **长生命周期守护进程** — 后台常驻，永不休眠，随时待命
 - **ACP 万能适配器** — 兼容任何实现了 [Agent Client Protocol](https://github.com/anthropics/agent-client-protocol) 的 AI Agent
+- **Session 自动恢复** — 通过 `resume > load > create` 三级回退策略自动重连 session
+- **多 Session 管理** — 支持每个用户同时运行多个 session，可创建、切换、列出、删除
 - **定时任务 (Cron)** — 通过 cron 表达式设置定时任务，自动触发 Agent 执行
 - **会话持久化** — 即使重启服务，也能无缝衔接之前的对话
 - **记忆系统** — Agent 会记住你的项目背景、技术决策和偏好
+- **Reflexion Pipeline** — 自动反思 Agent 输出，提升回答质量
 - **斜杠命令** — 通过 `/` 命令快速控制 Agent 行为
 - **多 Agent 切换** — 在不同的 AI Agent 之间自由切换
 
@@ -136,9 +139,14 @@ graph LR
 | `/help` | 显示可用命令列表 |
 | `/status` | 查看守护进程和 Agent 状态 |
 | `/agent <name>` | 切换到指定 Agent |
+| `/session new` | 创建新 session |
+| `/session list` | 查看当前用户所有 session |
+| `/session switch <id>` | 切换到指定 session |
+| `/session delete <id>` | 删除 session |
+| `/restart` | 重启 ACP client 连接 |
 | `/memory` | 查看当前会话记忆 |
 | `/clear` | 清空当前会话上下文 |
-| `/restart` | 重启 Agent 进程 |
+| `/language <en\|zh>` | 切换响应语言 |
 
 ---
 
@@ -221,33 +229,6 @@ npm run dev
 # 运行测试
 npm test
 ```
-
----
-
-## 共建计划
-
-ACP Claw 目前仅支持 **飞书/Lark** 作为消息通道。我们急需社区力量共建更多 Channel！
-
-### 期望支持的 Channel
-
-| Channel | 状态 | 说明 |
-|---------|------|------|
-| 飞书/Lark | ✅ 已完成 | 已支持 |
-| WhatsApp | 🙏 急需共建 | WhatsApp Business API 集成 |
-| Slack | 🙏 急需共建 | Slack Bot Events API 集成 |
-| Discord | 🙏 急需共建 | Discord Bot 集成 |
-| Telegram | 🙏 急需共建 | Telegram Bot API 集成 |
-| 钉钉 | 🙏 急需共建 | 钉钉机器人 webhook/stream |
-| 企业微信 | 🙏 急需共建 | 企业微信机器人 |
-
-### 如何贡献一个 Channel
-
-1. 在 `src/channel/` 下新建文件（如 `src/channel/slack.ts`）
-2. 实现 Channel 接口（参考 `src/channel/feishu.ts`）
-3. 在 `src/controller.ts` 中注册
-4. 提交 PR！
-
-欢迎任何形式的贡献 —— 新 Channel、Bug 修复、文档完善或想法讨论。欢迎先开 Issue 交流。
 
 ---
 

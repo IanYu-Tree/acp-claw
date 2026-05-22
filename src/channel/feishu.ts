@@ -10,7 +10,7 @@ export interface FeishuMessage {
   raw?: unknown;
 }
 
-export type MessageHandler = (message: FeishuMessage) => void;
+export type MessageHandler = (message: FeishuMessage) => void | Promise<void>;
 
 export interface FeishuChannelConfig {
   appId: string;
@@ -182,7 +182,9 @@ export class FeishuChannel {
           raw: { ...rawData, message: normalizedMessage },
         };
 
-        this.handler?.(incoming);
+        Promise.resolve(this.handler?.(incoming)).catch((err) => {
+          console.error('[feishu] Error in message handler:', err instanceof Error ? err.message : String(err));
+        });
         this.reactWorkingEmoji(messageId);
       },
     });

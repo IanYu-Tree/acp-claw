@@ -1,12 +1,20 @@
-import { EventEmitter } from 'node:events';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { createInterface } from 'node:readline';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createInterface } from 'node:readline';
 import type { ContentBlock } from './prompt-builder.js';
 
+export interface SessionUpdateMeta {
+  id?: string;
+  lastChunk?: boolean;
+  type?: 'full' | 'delta';
+  messageId?: string;
+}
+
 export interface SessionUpdate {
+  _meta?: SessionUpdateMeta;
   sessionUpdate: string;
   content?: { type: string; text: string };
   toolCallId?: string;
@@ -45,23 +53,38 @@ interface JsonRpcResponse {
   error?: { code: number; message: string; data?: unknown };
 }
 
-type JsonRpcMessage = JsonRpcResponse | JsonRpcNotification | JsonRpcIncomingRequest;
+type JsonRpcMessage =
+  | JsonRpcResponse
+  | JsonRpcNotification
+  | JsonRpcIncomingRequest;
 
 export class AcpClient extends EventEmitter {
   private process: ChildProcess | null = null;
   private nextId = 1;
-  private pending = new Map<number | string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private pending = new Map<
+    number | string,
+    { resolve: (v: unknown) => void; reject: (e: Error) => void }
+  >();
   private command: string;
   private args: string[];
+  private initResult: {
+    agentCapabilities?: {
+      loadSession?: boolean;
+      sessionCapabilities?: { resume?: boolean; close?: boolean };
+    };
+  } | null = null;
   private shutdownTimeout = 5000;
-  private terminals = new Map<string, {
-    process: ChildProcess;
-    output: string;
-    exited: boolean;
-    exitCode: number | null;
-    signal: string | null;
-    exitPromise: Promise<{ exitCode: number | null; signal: string | null }>;
-  }>();
+  private terminals = new Map<
+    string,
+    {
+      process: ChildProcess;
+      output: string;
+      exited: boolean;
+      exitCode: number | null;
+      signal: string | null;
+      exitPromise: Promise<{ exitCode: number | null; signal: string | null }>;
+    }
+  >();
 
   constructor(command: string, args: string[] = []) {
     super();
@@ -80,7 +103,9 @@ export class AcpClient extends EventEmitter {
     });
 
     this.process.on('close', (code) => {
-      this.rejectAllPending(new Error(`Agent process exited with code ${code}`));
+      this.rejectAllPending(
+        new Error(`Agent process exited with code ${code}`),
+      );
       this.process = null;
       this.emit('close');
     });
@@ -108,19 +133,50 @@ export class AcpClient extends EventEmitter {
     }
 
     // Perform initialize handshake
-    await this.request('initialize', {
+    this.initResult = (await this.request('initialize', {
       protocolVersion: 1,
       clientCapabilities: {
         fs: { readTextFile: true, writeTextFile: true },
         terminal: true,
       },
       clientInfo: { name: 'acp-claw', version: '1.0.0' },
-    });
+    })) as {
+      agentCapabilities?: {
+        loadSession?: boolean;
+        sessionCapabilities?: { resume?: boolean; close?: boolean };
+      };
+    };
+  }
+
+  supportsLoadSession(): boolean {
+    return Boolean(this.initResult?.agentCapabilities?.loadSession);
+  }
+
+  supportsResumeSession(): boolean {
+    return Boolean(
+      this.initResult?.agentCapabilities?.sessionCapabilities?.resume,
+    );
+  }
+
+  async resumeSession(sessionId: string, cwd: string): Promise<string> {
+    await this.request('session/resume', { sessionId, cwd, mcpServers: [] });
+    return sessionId;
   }
 
   async createSession(cwd: string): Promise<string> {
-    const result = (await this.request('session/new', { cwd, mcpServers: [] })) as { sessionId: string };
+    const result = (await this.request('session/new', {
+      cwd,
+      mcpServers: [],
+    })) as { sessionId?: string };
+    if (!result?.sessionId) {
+      throw new Error('session/new did not return a valid sessionId');
+    }
     return result.sessionId;
+  }
+
+  async loadSession(sessionId: string, cwd: string): Promise<string> {
+    await this.request('session/load', { sessionId, cwd, mcpServers: [] });
+    return sessionId;
   }
 
   async prompt(sessionId: string, prompt: ContentBlock[]): Promise<void> {
@@ -153,9 +209,17 @@ export class AcpClient extends EventEmitter {
     // Wait for graceful exit, then escalate
     await new Promise<void>((resolve) => {
       const timeout = setTimeout(() => {
-        try { proc.kill('SIGTERM'); } catch { /* already dead */ }
+        try {
+          proc.kill('SIGTERM');
+        } catch {
+          /* already dead */
+        }
         const killTimeout = setTimeout(() => {
-          try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+          try {
+            proc.kill('SIGKILL');
+          } catch {
+            /* already dead */
+          }
           resolve();
         }, this.shutdownTimeout);
         proc.once('close', () => {
@@ -195,7 +259,9 @@ export class AcpClient extends EventEmitter {
 
   private handleMessage(msg: JsonRpcMessage): void {
     const hasId = 'id' in msg && msg.id != null;
-    const hasMethod = 'method' in msg && typeof (msg as unknown as Record<string, unknown>).method === 'string';
+    const hasMethod =
+      'method' in msg &&
+      typeof (msg as unknown as Record<string, unknown>).method === 'string';
 
     if (hasId && hasMethod) {
       // Agent-to-client request (has both id and method)
@@ -219,7 +285,9 @@ export class AcpClient extends EventEmitter {
 
   private handleNotification(msg: JsonRpcNotification): void {
     if (msg.method === 'session/update') {
-      const params = msg.params as { sessionId: string; update: SessionUpdate } | undefined;
+      const params = msg.params as
+        | { sessionId: string; update: SessionUpdate }
+        | undefined;
       if (params) {
         this.emit('session-update', params.sessionId, params.update);
       }
@@ -247,17 +315,21 @@ export class AcpClient extends EventEmitter {
           respond(this.handleRequestPermission(msg.params));
           break;
         case 'terminal/create':
-          this.handleCreateTerminal(msg.params).then(respond).catch((e) => {
-            respondError(-32603, e instanceof Error ? e.message : String(e));
-          });
+          this.handleCreateTerminal(msg.params)
+            .then(respond)
+            .catch((e) => {
+              respondError(-32603, e instanceof Error ? e.message : String(e));
+            });
           return; // async, already handled
         case 'terminal/output':
           respond(this.handleTerminalOutput(msg.params));
           break;
         case 'terminal/wait_for_exit':
-          this.handleWaitForTerminalExit(msg.params).then(respond).catch((e) => {
-            respondError(-32603, e instanceof Error ? e.message : String(e));
-          });
+          this.handleWaitForTerminalExit(msg.params)
+            .then(respond)
+            .catch((e) => {
+              respondError(-32603, e instanceof Error ? e.message : String(e));
+            });
           return; // async, already handled
         case 'terminal/kill':
           respond(this.handleKillTerminal(msg.params));
@@ -275,7 +347,11 @@ export class AcpClient extends EventEmitter {
     }
   }
 
-  private sendResponse(id: number | string, result: unknown, error: { code: number; message: string } | undefined): void {
+  private sendResponse(
+    id: number | string,
+    result: unknown,
+    error: { code: number; message: string } | undefined,
+  ): void {
     if (!this.process?.stdin || this.process.stdin.destroyed) return;
     const response: Record<string, unknown> = { jsonrpc: '2.0', id };
     if (error) {
@@ -296,7 +372,9 @@ export class AcpClient extends EventEmitter {
   }
 
   private handleWriteTextFile(params: unknown): { created: boolean } {
-    const p = params as { path?: string; content?: string; sessionId?: string } | undefined;
+    const p = params as
+      | { path?: string; content?: string; sessionId?: string }
+      | undefined;
     if (!p?.path || typeof p.content !== 'string') {
       throw new Error('Missing required parameters: path and content');
     }
@@ -309,22 +387,36 @@ export class AcpClient extends EventEmitter {
     return { created: !fileExists };
   }
 
-  private handleRequestPermission(params: unknown): { outcome: { outcome: string; optionId?: string } } {
-    const p = params as { options?: Array<{ optionId: string; kind: string }> } | undefined;
+  private handleRequestPermission(params: unknown): {
+    outcome: { outcome: string; optionId?: string };
+  } {
+    const p = params as
+      | { options?: Array<{ optionId: string; kind: string }> }
+      | undefined;
     const options = p?.options ?? [];
     if (options.length === 0) {
       return { outcome: { outcome: 'cancelled' } };
     }
     // Auto-approve: prefer "allow" kind options (protocol uses 'allow_once'/'allow_always')
-    const allowOption = options.find(o =>
-      o.kind === 'allow_once' || o.kind === 'allow_always'
+    const allowOption = options.find(
+      (o) => o.kind === 'allow_once' || o.kind === 'allow_always',
     );
     const selected = allowOption ?? options[0];
     return { outcome: { outcome: 'selected', optionId: selected.optionId } };
   }
 
-  private async handleCreateTerminal(params: unknown): Promise<{ terminalId: string }> {
-    const p = params as { command?: string; args?: string[]; cwd?: string; env?: Record<string, string>; sessionId?: string } | undefined;
+  private async handleCreateTerminal(
+    params: unknown,
+  ): Promise<{ terminalId: string }> {
+    const p = params as
+      | {
+          command?: string;
+          args?: string[];
+          cwd?: string;
+          env?: Record<string, string>;
+          sessionId?: string;
+        }
+      | undefined;
     if (!p?.command) {
       throw new Error('Missing required parameter: command');
     }
@@ -349,7 +441,10 @@ export class AcpClient extends EventEmitter {
       exited: false,
       exitCode: null,
       signal: null,
-      exitPromise: null as unknown as Promise<{ exitCode: number | null; signal: string | null }>,
+      exitPromise: null as unknown as Promise<{
+        exitCode: number | null;
+        signal: string | null;
+      }>,
     };
 
     const MAX_OUTPUT = 64 * 1024;
@@ -379,7 +474,11 @@ export class AcpClient extends EventEmitter {
     return { terminalId };
   }
 
-  private handleTerminalOutput(params: unknown): { output: string; truncated: boolean; exitStatus?: { exitCode: number | null; signal: string | null } } {
+  private handleTerminalOutput(params: unknown): {
+    output: string;
+    truncated: boolean;
+    exitStatus?: { exitCode: number | null; signal: string | null };
+  } {
     const p = params as { terminalId?: string } | undefined;
     if (!p?.terminalId) {
       throw new Error('Missing required parameter: terminalId');
@@ -388,17 +487,26 @@ export class AcpClient extends EventEmitter {
     if (!terminal) {
       throw new Error(`Terminal not found: ${p.terminalId}`);
     }
-    const result: { output: string; truncated: boolean; exitStatus?: { exitCode: number | null; signal: string | null } } = {
+    const result: {
+      output: string;
+      truncated: boolean;
+      exitStatus?: { exitCode: number | null; signal: string | null };
+    } = {
       output: terminal.output,
       truncated: terminal.output.length >= 64 * 1024,
     };
     if (terminal.exited) {
-      result.exitStatus = { exitCode: terminal.exitCode, signal: terminal.signal };
+      result.exitStatus = {
+        exitCode: terminal.exitCode,
+        signal: terminal.signal,
+      };
     }
     return result;
   }
 
-  private async handleWaitForTerminalExit(params: unknown): Promise<{ exitCode: number | null; signal: string | null }> {
+  private async handleWaitForTerminalExit(
+    params: unknown,
+  ): Promise<{ exitCode: number | null; signal: string | null }> {
     const p = params as { terminalId?: string } | undefined;
     if (!p?.terminalId) {
       throw new Error('Missing required parameter: terminalId');
