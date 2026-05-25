@@ -13,6 +13,8 @@ export interface ActiveSession {
   client: AcpClient;
   busy: boolean;
   isNew: boolean;
+  /** true = session 刚从 reconnect 恢复，第一次 prompt 可能收到 replay */
+  expectReplay: boolean;
   promptPromise: Promise<void> | null;
 }
 
@@ -55,6 +57,14 @@ export class SessionManager {
     const client = new AcpClient(agentConfig.command, agentConfig.args ?? []);
     await client.start();
 
+    // 在 loadSession 之前注册 listener，确保协议规定的 replay events 被正确接收消费
+    // loadSession 期间：静默消费 replay（session 尚未创建，emit 为空操作）
+    // prompt 期间：通过 prompt() 注册的独立 listener 路由到 pipeline
+    client.on('session-update', (sessionId: string, update: SessionUpdate) => {
+      console.log(`[before loading session-update] sessionId：${sessionId} ${JSON.stringify(update)}`);
+      // 消费 replay events，防止 Node.js EventEmitter 警告
+    });
+
     // Reconnect: 按 resume > load > create 优先级恢复 session
     let acpSessionId: string;
     if (restoredRecord?.acpSessionId) {
@@ -93,6 +103,7 @@ export class SessionManager {
       client,
       busy: false,
       isNew: !isReconnect,
+      expectReplay: isReconnect,
       promptPromise: null,
     };
 
@@ -295,6 +306,7 @@ export class SessionManager {
         client: null as unknown as AcpClient,
         busy: false,
         isNew: false,
+        expectReplay: false,
         promptPromise: null,
       });
     }

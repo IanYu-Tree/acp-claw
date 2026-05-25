@@ -6,11 +6,18 @@ export type ContentBlock = { type: 'text'; text: string };
 /**
  * 格式化用户消息，包含渠道和发送者信息
  */
-export function formatUserMessage(channel: string, userId: string, text: string): string {
+export function formatUserMessage(
+  channel: string,
+  userId: string,
+  text: string,
+): string {
   return `[${channel}] from ${userId}: ${text}`;
 }
 
-export function buildPrompt(text: string, filePaths?: string[]): ContentBlock[] {
+export function buildPrompt(
+  text: string,
+  filePaths?: string[],
+): ContentBlock[] {
   let fullText = '';
 
   if (filePaths && filePaths.length > 0) {

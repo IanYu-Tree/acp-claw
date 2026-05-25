@@ -62,6 +62,7 @@ export class PromptPipeline {
     sessionKey: string,
     parts: ContentBlock[],
     callbacks: PipelineCallbacks,
+    options?: { expectReplay?: boolean },
   ): Promise<PipelineResult> {
     this.state = PipelineState.EXECUTING;
 
@@ -70,9 +71,9 @@ export class PromptPipeline {
     let hasSentMessage = false;
     let turnCompleted = false;
     let currentMessageId: string | undefined;
-    // 标记是否已收到当前 prompt 的 user_message_chunk echo
-    // 在此之前的所有 agent 消息都是历史回放，应忽略
-    let seenUserMessageEcho = false;
+    // expectReplay=true（reconnect 后第一次 prompt）：初始 false，等 user_message_chunk 再开始转发
+    // expectReplay=false（正常 prompt）：初始 true，消息直接通过
+    let seenUserMessageEcho = !options?.expectReplay;
 
     // 独立发送队列 — 不阻塞 update 处理，按顺序并行发送
     let sendChain = Promise.resolve();
@@ -130,21 +131,18 @@ export class PromptPipeline {
         update.sessionUpdate === 'agent_message_chunk' &&
         update.content?.text
       ) {
-        const msgId = update._meta?.id;
         const metaType = update._meta?.type;
 
+        // HACK: coco agent 的 loadSession 时序有 bug，replay notifications 异步延迟发出，
+        // 混入 prompt 阶段。观察到 replay 消息的 type 始终为 "full"，
+        // 而新增的实时 agent 消息 type 为 "partial"。
+        // 暂时只处理 partial 类型，等 coco 修复时序后移除此 hack。
         if (metaType === 'full') {
-          // type=full: 完整替换当前消息文本（流式快照模式）
-          // 不同 ID = 新逻辑消息，flush 上一条
-          if (msgId && msgId !== currentMessageId) {
-            flushText();
-            currentMessageId = msgId;
-          }
-          textBuffer = update.content.text;
-        } else {
-          // type=partial/delta 或无 meta: 追加累积，不按 ID 拆分
-          textBuffer += update.content.text;
+          return;
         }
+
+        // type=partial: 追加累积
+        textBuffer += update.content.text;
 
         // lastChunk 标记当前消息结束，flush 并重置
         if (update._meta?.lastChunk) {

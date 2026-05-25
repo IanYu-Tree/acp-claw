@@ -1,13 +1,64 @@
 // ACP Claw - ACP protocol based client with Feishu channel
 
-export { Controller } from './core/controller.js';
+export { listAgents, resolveAgent } from './acp/agent-registry.js';
 export { AcpClient, type SessionUpdate } from './acp/client.js';
 export { buildPrompt, type ContentBlock } from './acp/prompt-builder.js';
-export { resolveAgent, listAgents } from './acp/agent-registry.js';
-export { FeishuChannel, type FeishuMessage, type FeishuChannelConfig } from './channel/feishu.js';
-export { SessionManager, type ActiveSession } from './session/manager.js';
-export { SessionStore, type SessionRecord, type ControllerState } from './session/store.js';
+export { type Channel, type IncomingMessage } from './types/channel.js';
+export {
+  type OutgoingMessage,
+  type OutgoingMessageResult,
+  type MessageHandler,
+} from './types/messages.js';
+export {
+  type ControllerEvents,
+  type EventName,
+} from './types/events.js';
+export { EventBus } from './infra/event-bus.js';
+export { MessageBus } from './infra/message-bus.js';
+export {
+  buildInitialContext,
+  buildInitGuidance,
+} from './infra/context-builder.js';
+export {
+  PromptPipeline,
+  type PipelineCallbacks,
+  type PipelineResult,
+  PipelineState,
+} from './pipeline/pipeline.js';
+export { MessageDispatcher } from './dispatch/message-dispatcher.js';
+export { Controller } from './app/controller.js';
+export {
+  A2AServerChannel,
+} from './channel/a2a.js';
+export {
+  FeishuChannel,
+  type FeishuMessage,
+} from './channel/feishu.js';
+export {
+  SchedulerChannel,
+  type ScheduledTask,
+} from './channel/scheduler.js';
+export {
+  type CommandContext,
+  type CommandResult,
+  handleCommand,
+} from './commands/handlers.js';
+export { type ParsedCommand, parseSlashCommand } from './commands/parser.js';
+export {
+  type A2AChannelConfig,
+  type AcpClawConfig,
+  type AgentConfig,
+  type FeishuChannelConfig,
+  initWorkDir,
+  loadConfig,
+  loadFeishuConfigFromEnv,
+  resolveWorkDir,
+  saveConfig,
+} from './config.js';
+export { type ActiveSession, SessionManager } from './session/manager.js';
 export { getSessionKey } from './session/router.js';
-export { parseSlashCommand, type ParsedCommand } from './commands/parser.js';
-export { handleCommand, type CommandContext, type CommandResult } from './commands/handlers.js';
-export { type AcpClawConfig, type AgentConfig, loadConfig, saveConfig, initWorkDir, resolveWorkDir } from './config.js';
+export {
+  type ControllerState,
+  type SessionRecord,
+  SessionStore,
+} from './session/store.js';

@@ -1,20 +1,4 @@
-/**
- * 所有内部事件定义
- */
-export interface ControllerEvents {
-  'message-arrived': {
-    message: { id: string; content: string; senderId: string; chatId?: string; chatType?: 'p2p' | 'group' };
-    channel: string;
-    sessionKey: string;
-    userPrefix: string;
-  };
-  'session-started': { sessionKey: string };
-  'session-finished': { sessionKey: string; interrupted: boolean };
-  'cron-triggered': { task: { name: string; schedule: string; prompt: string; chatId?: string; oneShot?: boolean } };
-  'controller-stop': {};
-}
-
-export type EventName = keyof ControllerEvents;
+import type { ControllerEvents, EventName } from '../types/events.js';
 
 type Handler<T> = (payload: T) => void | Promise<void>;
 
@@ -24,7 +8,10 @@ type Handler<T> = (payload: T) => void | Promise<void>;
 export class EventBus {
   private handlers = new Map<string, Set<Handler<any>>>();
 
-  on<K extends EventName>(event: K, handler: Handler<ControllerEvents[K]>): () => void {
+  on<K extends EventName>(
+    event: K,
+    handler: Handler<ControllerEvents[K]>,
+  ): () => void {
     if (!this.handlers.has(event)) {
       this.handlers.set(event, new Set());
     }

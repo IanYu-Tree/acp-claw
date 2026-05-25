@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from '@rstest/core';
+import { afterEach, beforeEach, describe, expect, it } from '@rstest/core';
 import {
   existsSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'fs';
