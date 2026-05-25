@@ -1,7 +1,7 @@
 export type Lang = 'zh' | 'en';
 
 const messages: Record<string, Record<Lang, string>> = {
-  'unknown_command': {
+  unknown_command: {
     zh: '未知命令: /{command}\n输入 /help 查看可用命令',
     en: 'Unknown command: /{command}\nType /help for available commands',
   },
@@ -37,13 +37,57 @@ const messages: Record<string, Record<Lang, string>> = {
     zh: '最近活动',
     en: 'Last activity',
   },
+  'session.status_reconnecting': {
+    zh: '\n🟡 待重连（发送消息自动恢复）',
+    en: '\n🟡 Pending reconnect (auto-reconnects on next message)',
+  },
   'session.new_created': {
-    zh: '已新建 Session，Agent: {agent}',
-    en: 'New session created, Agent: {agent}',
+    zh: '✅ 新建 session #{id}，已切换。',
+    en: '✅ New session #{id} created and switched.',
+  },
+  'session.list_empty': {
+    zh: '暂无 session。',
+    en: 'No sessions.',
+  },
+  'session.list_title': {
+    zh: 'Sessions:',
+    en: 'Sessions:',
+  },
+  'session.switch_usage': {
+    zh: '用法: /session switch <id>',
+    en: 'Usage: /session switch <id>',
+  },
+  'session.switch_not_found': {
+    zh: 'Session #{id} 不存在。使用 /session list 查看可用列表。',
+    en: 'Session #{id} not found. Use /session list to see available sessions.',
+  },
+  'session.switch_success': {
+    zh: '✅ 已切换到 session #{id}。',
+    en: '✅ Switched to session #{id}.',
+  },
+  'session.delete_usage': {
+    zh: '用法: /session delete <id>',
+    en: 'Usage: /session delete <id>',
+  },
+  'session.delete_not_found': {
+    zh: 'Session #{id} 不存在。使用 /session list 查看可用列表。',
+    en: 'Session #{id} not found. Use /session list to see available sessions.',
+  },
+  'session.delete_busy': {
+    zh: 'Session #{id} 正忙，请等待完成后再删除。',
+    en: 'Session #{id} is busy. Please wait for it to finish before deleting.',
+  },
+  'session.delete_active': {
+    zh: '不能删除当前活跃的 session。请先 /session switch 到其他 session。',
+    en: 'Cannot delete the active session. Please /session switch to another session first.',
+  },
+  'session.delete_success': {
+    zh: '✅ Session #{id} 已删除。',
+    en: '✅ Session #{id} deleted.',
   },
   'session.unknown_sub': {
-    zh: '不支持的子命令: /session {sub}\n用法: /session [new]',
-    en: 'Unknown subcommand: /session {sub}\nUsage: /session [new]',
+    zh: '不支持的子命令: /session {sub}\n用法: /session [new|list|switch|delete]',
+    en: 'Unknown subcommand: /session {sub}\nUsage: /session [new|list|switch|delete]',
   },
   'status.no_session': {
     zh: '无活跃 Session (key: {key})',
@@ -65,6 +109,14 @@ const messages: Record<string, Record<Lang, string>> = {
     zh: '最近活动',
     en: 'Last activity',
   },
+  'restart.busy': {
+    zh: '当前 session 正忙，请稍后再试。',
+    en: 'Session is busy, please try again later.',
+  },
+  'restart.success': {
+    zh: '✅ ACP client 已重启。',
+    en: '✅ ACP client restarted.',
+  },
   'help.title': {
     zh: '可用命令:',
     en: 'Available commands:',
@@ -74,8 +126,24 @@ const messages: Record<string, Record<Lang, string>> = {
     en: '/agent [name] - View or switch Agent',
   },
   'help.session': {
-    zh: '/session [new] - 查看或新建 Session',
-    en: '/session [new] - View or create new Session',
+    zh: '/session - 查看当前 Session 状态',
+    en: '/session - View current session status',
+  },
+  'help.session_new': {
+    zh: '  /session new - 创建新 session',
+    en: '  /session new - Create new session',
+  },
+  'help.session_list': {
+    zh: '  /session list - 查看 session 列表',
+    en: '  /session list - List sessions',
+  },
+  'help.session_switch': {
+    zh: '  /session switch <id> - 切换 session',
+    en: '  /session switch <id> - Switch session',
+  },
+  'help.session_delete': {
+    zh: '  /session delete <id> - 删除 session',
+    en: '  /session delete <id> - Delete session',
   },
   'help.status': {
     zh: '/status - 查看当前状态',
@@ -84,6 +152,10 @@ const messages: Record<string, Record<Lang, string>> = {
   'help.language': {
     zh: '/language [zh|en] - 切换语言',
     en: '/language [zh|en] - Switch language',
+  },
+  'help.restart': {
+    zh: '/restart - 重启 ACP client',
+    en: '/restart - Restart ACP client',
   },
   'help.help': {
     zh: '/help - 显示帮助信息',
@@ -103,7 +175,11 @@ const messages: Record<string, Record<Lang, string>> = {
   },
 };
 
-export function t(key: string, lang: Lang, vars?: Record<string, string>): string {
+export function t(
+  key: string,
+  lang: Lang,
+  vars?: Record<string, string>,
+): string {
   const entry = messages[key];
   if (!entry) return key;
   let text = entry[lang] ?? entry['zh'];

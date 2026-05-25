@@ -4,11 +4,17 @@ export interface ParsedCommand {
   raw: string;
 }
 
-export function parseSlashCommand(messageContent: string): ParsedCommand | undefined {
+export function parseSlashCommand(
+  messageContent: string,
+): ParsedCommand | undefined {
   let text = messageContent;
   try {
     const parsed = JSON.parse(messageContent);
-    if (typeof parsed === 'object' && parsed !== null && typeof parsed.text === 'string') {
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof parsed.text === 'string'
+    ) {
       text = parsed.text;
     }
   } catch {

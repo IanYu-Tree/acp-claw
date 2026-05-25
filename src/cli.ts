@@ -1,14 +1,21 @@
 #!/usr/bin/env node
 
-import { accessSync, constants as fsConstants, existsSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { Command } from 'commander';
+import {
+  accessSync,
+  existsSync,
+  constants as fsConstants,
+  readFileSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Command } from 'commander';
 import { initWorkDir, loadConfig, resolveWorkDir } from './config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkgJson = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
+const pkgJson = JSON.parse(
+  readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'),
+);
 
 const program = new Command();
 
@@ -30,7 +37,9 @@ program
     if (config.feishu) {
       console.log(`   飞书 Channel: 已配置`);
     } else {
-      console.log(`   飞书 Channel: 未配置 (设置 LARK_APP_ID 和 LARK_APP_SECRET 环境变量或编辑 config.json)`);
+      console.log(
+        `   飞书 Channel: 未配置 (设置 LARK_APP_ID 和 LARK_APP_SECRET 环境变量或编辑 config.json)`,
+      );
     }
   });
 
@@ -41,7 +50,7 @@ program
     const workDir = resolveWorkDir(program.opts().workDir);
     const config = loadConfig(workDir);
 
-    const { Controller } = await import('./core/controller.js');
+    const { Controller } = await import('./app/controller.js');
     const controller = new Controller(config, workDir);
     await controller.start();
   });
@@ -58,7 +67,9 @@ program
         const globalPrefix = prefixResult.stdout?.trim();
         if (!globalPrefix) return true;
         const globalLibDir = join(globalPrefix, 'lib');
-        const dirToCheck = existsSync(globalLibDir) ? globalLibDir : globalPrefix;
+        const dirToCheck = existsSync(globalLibDir)
+          ? globalLibDir
+          : globalPrefix;
         accessSync(dirToCheck, fsConstants.W_OK);
         return false;
       } catch {
@@ -113,8 +124,8 @@ cronCmd
   .option('--one-shot', '执行一次后自动删除', false)
   .action(async (opts) => {
     const workDir = resolveWorkDir(program.opts().workDir);
-    const { CronService } = await import('./cron/service.js');
-    const service = new CronService(workDir);
+    const { SchedulerChannel } = await import('./channel/scheduler.js');
+    const service = new SchedulerChannel(workDir);
     const result = service.addTask({
       name: opts.name,
       schedule: opts.schedule,
@@ -123,7 +134,13 @@ cronCmd
       oneShot: opts.oneShot,
     });
     if (result.success) {
-      console.log(JSON.stringify({ success: true, name: opts.name, schedule: opts.schedule }));
+      console.log(
+        JSON.stringify({
+          success: true,
+          name: opts.name,
+          schedule: opts.schedule,
+        }),
+      );
     } else {
       console.error(JSON.stringify({ success: false, error: result.error }));
       process.exit(1);
@@ -136,8 +153,8 @@ cronCmd
   .requiredOption('--name <name>', '任务名称')
   .action(async (opts) => {
     const workDir = resolveWorkDir(program.opts().workDir);
-    const { CronService } = await import('./cron/service.js');
-    const service = new CronService(workDir);
+    const { SchedulerChannel } = await import('./channel/scheduler.js');
+    const service = new SchedulerChannel(workDir);
     const result = service.deleteTask(opts.name);
     if (result.success) {
       console.log(JSON.stringify({ success: true, deleted: opts.name }));
@@ -152,8 +169,8 @@ cronCmd
   .description('列出所有定时任务')
   .action(async () => {
     const workDir = resolveWorkDir(program.opts().workDir);
-    const { CronService } = await import('./cron/service.js');
-    const service = new CronService(workDir);
+    const { SchedulerChannel } = await import('./channel/scheduler.js');
+    const service = new SchedulerChannel(workDir);
     const tasks = service.listTasks();
     console.log(JSON.stringify({ tasks, count: tasks.length }, null, 2));
   });
@@ -165,8 +182,8 @@ cronCmd
   .requiredOption('--enabled <enabled>', '启用状态 (true/false)')
   .action(async (opts) => {
     const workDir = resolveWorkDir(program.opts().workDir);
-    const { CronService } = await import('./cron/service.js');
-    const service = new CronService(workDir);
+    const { SchedulerChannel } = await import('./channel/scheduler.js');
+    const service = new SchedulerChannel(workDir);
     const enabled = opts.enabled === 'true';
     const result = service.toggleTask(opts.name, enabled);
     if (result.success) {

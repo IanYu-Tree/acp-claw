@@ -32,6 +32,7 @@ ACP Claw 就是为此而生的。它作为一个常驻守护进程运行：
 
 - **长生命周期守护进程** — 后台常驻，永不休眠，随时待命
 - **ACP 万能适配器** — 兼容任何实现了 [Agent Client Protocol](https://github.com/anthropics/agent-client-protocol) 的 AI Agent
+- **多通道接入** — 飞书 + A2A 协议；可插拔的 Channel 架构
 - **Session 自动恢复** — 通过 `resume > load > create` 三级回退策略自动重连 session
 - **多 Session 管理** — 支持每个用户同时运行多个 session，可创建、切换、列出、删除
 - **定时任务 (Cron)** — 通过 cron 表达式设置定时任务，自动触发 Agent 执行
@@ -108,26 +109,32 @@ acp-claw update
 
 ```mermaid
 graph LR
-    A[飞书消息] -->|WebSocket| B[Controller]
-    B --> C[SessionManager]
-    C --> D[AcpClient]
-    D --> E[Codex]
-    D --> F[Claude Code]
-    D --> G[Gemini]
-    D --> H[自定义 Agent]
+    A[飞书/Lark] -->|WebSocket| C[Controller]
+    B[A2A 客户端] -->|HTTP/SSE| C
+    S[定时调度] -->|Cron| C
+    C --> D[MessageDispatcher]
+    D --> E[SessionManager]
+    E --> F[AcpClient]
+    F --> G[Codex]
+    F --> H[Claude Code]
+    F --> I[Gemini]
+    F --> J[自定义 Agent]
 
     style A fill:#4e8cff,color:#fff
-    style B fill:#36cfc9,color:#fff
-    style C fill:#ffc53d,color:#fff
-    style D fill:#9254de,color:#fff
+    style B fill:#ff7a45,color:#fff
+    style S fill:#ffc53d,color:#fff
+    style C fill:#36cfc9,color:#fff
+    style D fill:#73d13d,color:#fff
+    style E fill:#ffc53d,color:#fff
+    style F fill:#9254de,color:#fff
 ```
 
 **数据流向：**
 
 ```
-飞书消息 → WebSocket → Controller → SessionManager → AcpClient → Agent
-  ↑                                                                  ↓
-  └──────────────────── 响应返回 ←───────────────────────────────────┘
+Channel (飞书/A2A/定时调度) → Controller → Dispatcher → SessionManager → AcpClient → Agent
+         ↑                                                                              ↓
+         └──────────────────────────── Response ←───────────────────────────────────────┘
 ```
 
 ---
@@ -229,6 +236,34 @@ npm run dev
 # 运行测试
 npm test
 ```
+
+---
+
+## 共建邀请
+
+欢迎社区一起贡献更多 Channel 和功能！
+
+### Channel 支持情况
+
+| Channel | 状态 | 说明 |
+|---------|------|------|
+| 飞书/Lark | ✅ 已完成 | 基于 WebSocket 的消息通道 |
+| A2A 协议 | ✅ 已完成 | Agent-to-Agent HTTP/SSE 通信 |
+| Slack | 🙏 期待共建 | Slack Bot Events API |
+| Discord | 🙏 期待共建 | Discord Bot 集成 |
+| Telegram | 🙏 期待共建 | Telegram Bot API |
+| WhatsApp | 🙏 期待共建 | WhatsApp Business API |
+| 钉钉 | 🙏 期待共建 | 钉钉机器人 webhook/stream |
+| 企业微信 | 🙏 期待共建 | 企业微信机器人 |
+
+### 如何贡献新 Channel
+
+1. 在 `src/channel/` 下新建文件（如 `src/channel/slack.ts`）
+2. 实现 `src/types/channel.ts` 中的 `Channel` 接口
+3. 在 `src/app/controller.ts` 中注册
+4. 提交 PR！
+
+欢迎任何形式的贡献 — 新 Channel、Bug 修复、文档改进或建议。欢迎先开 Issue 讨论。
 
 ---
 

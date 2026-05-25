@@ -1,7 +1,11 @@
 /**
  * Build session key: {channel}_{userId}_{sessionId}
  */
-export function getSessionKey(channel: string, userId: string, sessionId: number | string = 1): string {
+export function getSessionKey(
+  channel: string,
+  userId: string,
+  sessionId: number | string = 1,
+): string {
   if (userId) {
     return `${channel}_${userId}_${sessionId}`;
   }
@@ -18,7 +22,9 @@ export function getUserPrefix(channel: string, userId: string): string {
 /**
  * Parse session key into components
  */
-export function parseSessionKey(key: string): { channel: string; userId: string; sessionId: number } | null {
+export function parseSessionKey(
+  key: string,
+): { channel: string; userId: string; sessionId: number } | null {
   // Match pattern: {channel}_{userId}_{sessionId}
   // userId can contain underscores (e.g. ou_xxx), so we split from the end
   const lastUnderscore = key.lastIndexOf('_');

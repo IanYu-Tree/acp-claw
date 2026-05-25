@@ -1,4 +1,10 @@
-import { appendFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  unlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 export type LogLevel = 'info' | 'warn' | 'error' | 'debug';
@@ -15,7 +21,12 @@ export class Logger {
     }
   }
 
-  log(level: LogLevel, category: string, message: string, data?: unknown): void {
+  log(
+    level: LogLevel,
+    category: string,
+    message: string,
+    data?: unknown,
+  ): void {
     const now = new Date();
     const dateStr = this.formatDate(now);
     const timeStr = this.formatTime(now);

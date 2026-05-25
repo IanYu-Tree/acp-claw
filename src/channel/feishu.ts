@@ -1,4 +1,8 @@
 import * as Lark from '@larksuiteoapi/node-sdk';
+import type { Channel, IncomingMessage } from '../types/channel.js';
+import type { FeishuChannelConfig } from '../config.js';
+import { loadFeishuConfigFromEnv } from '../config.js';
+import type { MessageBus, OutgoingMessage, OutgoingMessageResult } from '../types/messages.js';
 
 export interface FeishuMessage {
   id: string;
@@ -12,34 +16,15 @@ export interface FeishuMessage {
 
 export type MessageHandler = (message: FeishuMessage) => void | Promise<void>;
 
-export interface FeishuChannelConfig {
-  appId: string;
-  appSecret: string;
-  domain?: string;
-  appName?: string;
-  chatId?: string;
-}
-
 const WORKING_EMOJI_TYPE = 'OnIt';
 
-export function loadFeishuConfigFromEnv(): FeishuChannelConfig | undefined {
-  const appId = process.env.LARK_APP_ID;
-  const appSecret = process.env.LARK_APP_SECRET;
-  if (!appId || !appSecret) return undefined;
-  return {
-    appId,
-    appSecret,
-    domain: process.env.LARK_DOMAIN || 'https://open.feishu.cn',
-    appName: process.env.LARK_APP_NAME,
-    chatId: process.env.LARK_CHAT_ID,
-  };
-}
-
-export class FeishuChannel {
+export class FeishuChannel implements Channel {
+  readonly name = 'feishu';
   private wsClient: Lark.WSClient;
   private apiClient: Lark.Client;
   private config: FeishuChannelConfig;
-  private handler?: MessageHandler;
+  private handler?: (message: IncomingMessage) => void | Promise<void>;
+  private messageBus?: MessageBus;
   private processedMessageIds = new Set<string>();
   private reactionStore = new Map<string, string>();
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -60,20 +45,25 @@ export class FeishuChannel {
     });
   }
 
-  async start(): Promise<void> {
+  async start(messageBus?: MessageBus): Promise<void> {
     this.stopped = false;
+    if (messageBus) {
+      this.messageBus = messageBus;
+      messageBus.subscribe(this.name, (msg) => this.handleOutgoing(msg));
+    }
     this.startWebSocket();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.messageBus?.unsubscribe(this.name);
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
   }
 
-  onMessage(handler: MessageHandler): void {
+  onMessage(handler: (message: IncomingMessage) => void): void {
     this.handler = handler;
   }
 
@@ -114,6 +104,26 @@ export class FeishuChannel {
     }
   }
 
+  private async handleOutgoing(msg: OutgoingMessage): Promise<OutgoingMessageResult> {
+    try {
+      if (msg.type === 'clear-reaction' && msg.messageId) {
+        await this.clearReaction(msg.messageId);
+        return { success: true };
+      }
+      if (msg.messageId) {
+        await this.reply(msg.messageId, msg.content);
+        return { success: true, messageId: msg.messageId };
+      }
+      if (msg.chatId) {
+        await this.send(msg.chatId, msg.content);
+        return { success: true };
+      }
+      return { success: false, error: 'No messageId or chatId provided' };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   private startWebSocket(): void {
     const eventDispatcher = new Lark.EventDispatcher({}).register({
       'im.message.receive_v1': async (data: unknown) => {
@@ -141,7 +151,9 @@ export class FeishuChannel {
         // Group chat filtering: only process if app is mentioned
         if (chatType === 'group') {
           const normalizedAppName = this.config.appName?.trim();
-          const mentions = (message['mentions'] ?? []) as Array<Record<string, unknown>>;
+          const mentions = (message['mentions'] ?? []) as Array<
+            Record<string, unknown>
+          >;
           const hasMention = mentions.length > 0;
 
           if (normalizedAppName) {
@@ -171,10 +183,12 @@ export class FeishuChannel {
             ? normalizedMessage['chat_id']
             : undefined;
 
-        const incoming: FeishuMessage = {
+        const incoming: IncomingMessage = {
           id: messageId,
+          channelName: this.name,
+          type: 'text',
           content: msgContent,
-          senderId: openId,
+          sender: { id: openId },
           chatId: chatIdValue,
           chatType:
             chatType === 'p2p' || chatType === 'group' ? chatType : undefined,
@@ -183,7 +197,10 @@ export class FeishuChannel {
         };
 
         Promise.resolve(this.handler?.(incoming)).catch((err) => {
-          console.error('[feishu] Error in message handler:', err instanceof Error ? err.message : String(err));
+          console.error(
+            '[feishu] Error in message handler:',
+            err instanceof Error ? err.message : String(err),
+          );
         });
         this.reactWorkingEmoji(messageId);
       },
@@ -249,7 +266,10 @@ export class FeishuChannel {
       if (visited.has(value)) return undefined;
       visited.add(value);
       const obj = value as Record<string, unknown>;
-      if (typeof obj['reaction_id'] === 'string' && obj['reaction_id'].length > 0) {
+      if (
+        typeof obj['reaction_id'] === 'string' &&
+        obj['reaction_id'].length > 0
+      ) {
         return obj['reaction_id'];
       }
       for (const nested of Object.values(obj)) {

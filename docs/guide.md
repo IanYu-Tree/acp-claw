@@ -5,7 +5,7 @@ ACP Claw 是一个基于 [ACP 协议](https://github.com/nicholasgasior/acp) 的
 ## 安装
 
 ```bash
-npm install -g acp-claw
+npm install -g @byted-iaas/acp-claw --registry https://bnpm.byted.org
 ```
 
 验证安装：
@@ -44,8 +44,9 @@ acp-claw init
 
 ```json
 {
-  "defaultAgent": "codex",
+  "defaultAgent": "coco",
   "agents": {
+    "coco": { "command": "coco", "args": ["acp", "serve"] },
     "codex": { "command": "npx", "args": ["@zed-industries/codex-acp@^0.12.0"] },
     "claude": { "command": "npx", "args": ["-y", "@agentclientprotocol/claude-agent-acp@^0.31.0"] }
   },
@@ -154,7 +155,7 @@ acp-claw update
 或手动更新：
 
 ```bash
-npm install -g acp-claw
+npm install -g @byted-iaas/acp-claw --registry https://bnpm.byted.org
 ```
 
 ## 常见问题

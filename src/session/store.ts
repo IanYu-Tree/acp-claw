@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 export interface SessionRecord {
@@ -42,7 +49,9 @@ export class SessionStore {
 
   list(): SessionRecord[] {
     if (!existsSync(this.sessionsDir)) return [];
-    const files = readdirSync(this.sessionsDir).filter((f) => f.endsWith('.json') && f !== '_controller.json');
+    const files = readdirSync(this.sessionsDir).filter(
+      (f) => f.endsWith('.json') && f !== '_controller.json',
+    );
     const records: SessionRecord[] = [];
     for (const file of files) {
       try {

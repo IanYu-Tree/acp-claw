@@ -30,6 +30,7 @@ No more context switching. Just message your agent and let it work.
 
 - **Long-Live Looping** — Daemon mode that never sleeps; always ready for your next instruction
 - **ACP Universal Adapter** — Connect to any agent that implements the [Agent Client Protocol](https://github.com/anthropics/agent-client-protocol)
+- **Multi-Channel** — Lark/Feishu + A2A protocol support; pluggable channel architecture
 - **Session Resume/Load** — Automatically reconnects sessions via `resume > load > create` fallback strategy
 - **Multi-Session** — Run multiple sessions per user; create, switch, list, and delete sessions on the fly
 - **Scheduled Tasks (Cron)** — Set up cron-based scheduled tasks to trigger agents automatically
@@ -106,26 +107,32 @@ acp-claw update
 
 ```mermaid
 graph LR
-    A[Feishu Message] -->|WebSocket| B[Controller]
-    B --> C[SessionManager]
-    C --> D[AcpClient]
-    D --> E[Codex]
-    D --> F[Claude Code]
-    D --> G[Gemini]
-    D --> H[Custom Agent]
+    A[Feishu/Lark] -->|WebSocket| C[Controller]
+    B[A2A Client] -->|HTTP/SSE| C
+    S[Scheduler] -->|Cron| C
+    C --> D[MessageDispatcher]
+    D --> E[SessionManager]
+    E --> F[AcpClient]
+    F --> G[Codex]
+    F --> H[Claude Code]
+    F --> I[Gemini]
+    F --> J[Custom Agent]
 
     style A fill:#4e8cff,color:#fff
-    style B fill:#36cfc9,color:#fff
-    style C fill:#ffc53d,color:#fff
-    style D fill:#9254de,color:#fff
+    style B fill:#ff7a45,color:#fff
+    style S fill:#ffc53d,color:#fff
+    style C fill:#36cfc9,color:#fff
+    style D fill:#73d13d,color:#fff
+    style E fill:#ffc53d,color:#fff
+    style F fill:#9254de,color:#fff
 ```
 
 **Data Flow:**
 
 ```
-Feishu Message → WebSocket → Controller → SessionManager → AcpClient → Agent
-     ↑                                                                    ↓
-     └──────────────────── Response ←─────────────────────────────────────┘
+Channel (Feishu/A2A/Scheduler) → Controller → Dispatcher → SessionManager → AcpClient → Agent
+         ↑                                                                                  ↓
+         └────────────────────────────── Response ←─────────────────────────────────────────┘
 ```
 
 ---
@@ -200,6 +207,9 @@ ACP Claw uses a YAML configuration file located at `.acp-claw/config.yaml`:
 |-------|------|-------------|
 | `feishu.app_id` | string | Feishu app ID |
 | `feishu.app_secret` | string | Feishu app secret |
+| `a2a.port` | number | A2A server port (default: 41007) |
+| `a2a.name` | string | Agent card name |
+| `a2a.description` | string | Agent card description |
 | `agent.command` | string | ACP agent startup command |
 | `agent.working_dir` | string | Working directory for the agent |
 | `session.persistence` | boolean | Enable session persistence across restarts |
@@ -227,6 +237,34 @@ npm run dev
 # Run tests
 npm test
 ```
+
+---
+
+## Contributing
+
+We welcome community contributions to bring more channels and features to life!
+
+### Channels
+
+| Channel | Status | Description |
+|---------|--------|-------------|
+| Lark/Feishu | ✅ Done | WebSocket-based messaging |
+| A2A Protocol | ✅ Done | Agent-to-Agent via HTTP/SSE |
+| Slack | 🙏 Help Wanted | Slack Bot via Events API |
+| Discord | 🙏 Help Wanted | Discord Bot integration |
+| Telegram | 🙏 Help Wanted | Telegram Bot API |
+| WhatsApp | 🙏 Help Wanted | WhatsApp Business API |
+| DingTalk | 🙏 Help Wanted | DingTalk robot webhook/stream |
+| WeChat Work | 🙏 Help Wanted | WeCom bot |
+
+### How to Add a Channel
+
+1. Create a new file under `src/channel/` (e.g., `src/channel/slack.ts`)
+2. Implement the `Channel` interface from `src/types/channel.ts`
+3. Register in `src/app/controller.ts`
+4. Submit a PR!
+
+All contributions are welcome — new channels, bug fixes, docs, or ideas. Feel free to open an issue to discuss.
 
 ---
 

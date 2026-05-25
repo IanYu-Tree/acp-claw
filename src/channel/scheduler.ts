@@ -1,68 +1,85 @@
 import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  mkdirSync,
-  renameSync,
   copyFileSync,
-  watch,
+  existsSync,
   type FSWatcher,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  watch,
+  writeFileSync,
 } from 'fs';
 import { join } from 'path';
 import cron, { type ScheduledTask as CronJob } from 'node-cron';
 import { CronExpressionParser } from 'cron-parser';
-import type { ScheduledTask, CronConfig } from './types.js';
+import type { Channel, IncomingMessage } from '../types/channel.js';
+import type { MessageBus } from '../types/messages.js';
 
-export interface CronLogger {
+export interface ScheduledTask {
+  name: string;
+  schedule: string;
+  prompt: string;
+  chatId?: string;
+  channelName?: string;
+  senderId?: string;
+  oneShot: boolean;
+  enabled: boolean;
+  createdAt: string;
+  lastRun: string | null;
+  nextRun: string | null;
+}
+
+interface SchedulerConfig {
+  tasks: ScheduledTask[];
+}
+
+export interface SchedulerLogger {
   info(msg: string): void;
   error(msg: string, err?: unknown): void;
 }
 
-const defaultLogger: CronLogger = {
-  info: (msg) => console.log(`[cron] ${msg}`),
-  error: (msg, err) => console.error(`[cron] ${msg}`, err ?? ''),
+const defaultLogger: SchedulerLogger = {
+  info: (msg) => console.log(`[scheduler] ${msg}`),
+  error: (msg, err) => console.error(`[scheduler] ${msg}`, err ?? ''),
 };
 
-export class CronService {
+export class SchedulerChannel implements Channel {
+  readonly name = 'scheduler';
+
   private workDir: string;
   private configPath: string;
-  private config: CronConfig = { tasks: [] };
+  private config: SchedulerConfig = { tasks: [] };
   private cronJobs = new Map<string, CronJob>();
-  private onTrigger?: (task: ScheduledTask) => Promise<void> | void;
-  private runningTasks = new Set<Promise<void>>();
+  private messageHandler: ((message: IncomingMessage) => void) | null = null;
   private watcher: FSWatcher | null = null;
-  private logger: CronLogger;
+  private logger: SchedulerLogger;
 
   // 防抖和自触发保护
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private isSaving = false;
   private static readonly DEBOUNCE_MS = 200;
 
-  constructor(
-    workDir: string,
-    onTrigger?: (task: ScheduledTask) => Promise<void> | void,
-    logger?: CronLogger,
-  ) {
+  constructor(workDir: string, logger?: SchedulerLogger) {
     this.workDir = workDir;
-    this.onTrigger = onTrigger;
     this.logger = logger ?? defaultLogger;
     const schedulerDir = join(workDir, 'scheduler');
     if (!existsSync(schedulerDir)) {
       mkdirSync(schedulerDir, { recursive: true });
     }
     this.configPath = join(schedulerDir, 'tasks.json');
-    // 构造时加载配置，确保 CLI 等场景下也能正常工作
     this.loadConfig();
   }
 
-  start(): void {
+  async start(_messageBus: MessageBus): Promise<void> {
+    this.logger.info(
+      `Loaded ${this.config.tasks.length} task(s) from ${this.configPath}`,
+    );
     for (const task of this.config.tasks) {
       if (task.enabled) {
         this.startCronJob(task);
       }
     }
     this.startWatcher();
-    this.logger.info('CronService started');
+    this.logger.info('SchedulerChannel started');
   }
 
   async stop(): Promise<void> {
@@ -75,12 +92,12 @@ export class CronService {
       job.stop();
     }
     this.cronJobs.clear();
-    // 等待所有正在执行的任务完成
-    if (this.runningTasks.size > 0) {
-      this.logger.info(`Waiting for ${this.runningTasks.size} running task(s) to complete...`);
-      await Promise.allSettled([...this.runningTasks]);
-    }
-    this.logger.info('CronService stopped');
+    this.messageHandler = null;
+    this.logger.info('SchedulerChannel stopped');
+  }
+
+  onMessage(handler: (message: IncomingMessage) => void): void {
+    this.messageHandler = handler;
   }
 
   addTask(params: {
@@ -88,14 +105,20 @@ export class CronService {
     schedule: string;
     prompt: string;
     chatId?: string;
+    channelName?: string;
+    senderId?: string;
     oneShot?: boolean;
   }): { success: boolean; error?: string } {
     if (!params.name) return { success: false, error: 'name is required' };
-    if (!params.schedule) return { success: false, error: 'schedule is required' };
+    if (!params.schedule)
+      return { success: false, error: 'schedule is required' };
     if (!params.prompt) return { success: false, error: 'prompt is required' };
 
     if (!cron.validate(params.schedule)) {
-      return { success: false, error: `Invalid cron expression: ${params.schedule}` };
+      return {
+        success: false,
+        error: `Invalid cron expression: ${params.schedule}`,
+      };
     }
 
     const existing = this.config.tasks.find((t) => t.name === params.name);
@@ -108,6 +131,8 @@ export class CronService {
       schedule: params.schedule,
       prompt: params.prompt,
       chatId: params.chatId,
+      channelName: params.channelName,
+      senderId: params.senderId,
       oneShot: params.oneShot ?? false,
       enabled: true,
       createdAt: new Date().toISOString(),
@@ -125,7 +150,8 @@ export class CronService {
 
   deleteTask(name: string): { success: boolean; error?: string } {
     const index = this.config.tasks.findIndex((t) => t.name === name);
-    if (index === -1) return { success: false, error: `Task not found: ${name}` };
+    if (index === -1)
+      return { success: false, error: `Task not found: ${name}` };
 
     const job = this.cronJobs.get(name);
     if (job) {
@@ -140,11 +166,10 @@ export class CronService {
     return { success: true };
   }
 
-  listTasks(): ScheduledTask[] {
-    return [...this.config.tasks];
-  }
-
-  toggleTask(name: string, enabled: boolean): { success: boolean; error?: string } {
+  toggleTask(
+    name: string,
+    enabled: boolean,
+  ): { success: boolean; error?: string } {
     const task = this.config.tasks.find((t) => t.name === name);
     if (!task) return { success: false, error: `Task not found: ${name}` };
 
@@ -163,8 +188,14 @@ export class CronService {
     }
 
     this.saveConfig();
-    this.logger.info(`Task toggled: "${name}" → ${enabled ? 'enabled' : 'disabled'}`);
+    this.logger.info(
+      `Task toggled: "${name}" → ${enabled ? 'enabled' : 'disabled'}`,
+    );
     return { success: true };
+  }
+
+  listTasks(): ScheduledTask[] {
+    return [...this.config.tasks];
   }
 
   private startCronJob(task: ScheduledTask): void {
@@ -189,27 +220,38 @@ export class CronService {
   }
 
   private executeTask(task: ScheduledTask): void {
+    this.logger.info(
+      `Executing task: "${task.name}" (oneShot: ${task.oneShot})`,
+    );
+
     task.lastRun = new Date().toISOString();
     task.nextRun = this.calculateNextRun(task.schedule);
 
-    const run = async () => {
-      try {
-        await this.onTrigger?.(task);
-      } catch (err) {
-        this.logger.error(`onTrigger error for task "${task.name}"`, err);
-      }
-
-      if (task.oneShot) {
-        this.saveConfig();
-        setImmediate(() => this.deleteTask(task.name));
-      } else {
-        this.saveConfig();
-      }
+    const message: IncomingMessage = {
+      id: `scheduled_${task.name}_${Date.now()}`,
+      channelName: 'scheduler',
+      type: 'text',
+      content: task.prompt,
+      sender: { id: task.name, name: `scheduler:${task.name}` },
+      chatId: task.chatId,
+      timestamp: Date.now(),
+      raw: {
+        taskName: task.name,
+        isScheduledTask: true,
+        sourceChannel: task.channelName,
+        senderId: task.senderId,
+        oneShot: task.oneShot,
+      },
     };
 
-    const promise = run();
-    this.runningTasks.add(promise);
-    promise.finally(() => this.runningTasks.delete(promise));
+    this.messageHandler?.(message);
+
+    if (task.oneShot) {
+      this.saveConfig();
+      setImmediate(() => this.deleteTask(task.name));
+    } else {
+      this.saveConfig();
+    }
   }
 
   private calculateNextRun(schedule: string): string | null {
@@ -225,13 +267,15 @@ export class CronService {
     if (existsSync(this.configPath)) {
       try {
         const raw = readFileSync(this.configPath, 'utf-8');
-        this.config = JSON.parse(raw) as CronConfig;
+        this.config = JSON.parse(raw) as SchedulerConfig;
       } catch (err) {
-        // 备份损坏的配置文件
         const backupPath = this.configPath + `.corrupted.${Date.now()}`;
         try {
           copyFileSync(this.configPath, backupPath);
-          this.logger.error(`Config corrupted, backed up to ${backupPath}`, err);
+          this.logger.error(
+            `Config corrupted, backed up to ${backupPath}`,
+            err,
+          );
         } catch {
           this.logger.error('Config corrupted and backup failed', err);
         }
@@ -251,7 +295,6 @@ export class CronService {
       writeFileSync(tmpPath, JSON.stringify(this.config, null, 2), 'utf-8');
       renameSync(tmpPath, this.configPath);
     } finally {
-      // 延迟重置标志，给 fs.watch 事件时间传播
       setTimeout(() => {
         this.isSaving = false;
       }, 50);
@@ -259,24 +302,21 @@ export class CronService {
   }
 
   private startWatcher(): void {
-    // 确保 configPath 存在（loadConfig 已保证创建）
     if (!existsSync(this.configPath)) {
       this.saveConfig();
     }
 
     this.watcher = watch(this.configPath, (eventType) => {
       if (eventType === 'change') {
-        // 自触发保护：忽略自己 saveConfig 引发的变更
         if (this.isSaving) return;
 
-        // 防抖：合并短时间内的多次事件
         if (this.debounceTimer) {
           clearTimeout(this.debounceTimer);
         }
         this.debounceTimer = setTimeout(() => {
           this.debounceTimer = null;
           this.reconcile();
-        }, CronService.DEBOUNCE_MS);
+        }, SchedulerChannel.DEBOUNCE_MS);
       }
     });
   }
@@ -289,10 +329,10 @@ export class CronService {
   }
 
   private reconcile(): void {
-    let newConfig: CronConfig;
+    let newConfig: SchedulerConfig;
     try {
       const raw = readFileSync(this.configPath, 'utf-8');
-      newConfig = JSON.parse(raw) as CronConfig;
+      newConfig = JSON.parse(raw) as SchedulerConfig;
     } catch {
       return;
     }
@@ -319,7 +359,11 @@ export class CronService {
         }
       } else {
         const oldTask = this.config.tasks.find((t) => t.name === task.name);
-        if (oldTask && (oldTask.schedule !== task.schedule || oldTask.enabled !== task.enabled)) {
+        if (
+          oldTask &&
+          (oldTask.schedule !== task.schedule ||
+            oldTask.enabled !== task.enabled)
+        ) {
           const job = this.cronJobs.get(task.name);
           if (job) {
             job.stop();

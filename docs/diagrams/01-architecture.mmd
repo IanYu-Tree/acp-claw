@@ -18,7 +18,7 @@ graph TB
 
     subgraph Agents["🤖 Agent 生态（即插即用）"]
         direction LR
-        Other["Other Agent"]
+        Coco["Coco<br/>字节内部 Agent"]
         Codex["OpenAI Codex"]
         Claude["Claude Code"]
         Gemini["Google Gemini"]
@@ -30,13 +30,13 @@ graph TB
     Controller --> SM
     SM --> Store
     SM --> Client
-    Client -->|"spawn + stdio"| Other
+    Client -->|"spawn + stdio"| Coco
     Client -->|"spawn + stdio"| Codex
     Client -->|"spawn + stdio"| Claude
     Client -->|"spawn + stdio"| Gemini
     Client -->|"spawn + stdio"| Custom
 
-    Other -->|"stream 回复"| Client
+    Coco -->|"stream 回复"| Client
     Client -->|"session/update"| Controller
     Controller -->|"飞书卡片"| WS
     WS -->|"回复"| Feishu

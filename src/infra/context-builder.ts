@@ -1,6 +1,6 @@
-import { readMemoryFile, isTemplateOnly } from '../config.js';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { isTemplateOnly, readMemoryFile } from '../config.js';
 
 export function buildInitialContext(workDir: string): string[] {
   const files: string[] = [];
@@ -15,7 +15,7 @@ export function buildInitialContext(workDir: string): string[] {
           files.push(join(dir, entry));
         }
       }
-    } catch { }
+    } catch {}
   }
 
   // Scan skills/*/SKILL.md
@@ -31,7 +31,7 @@ export function buildInitialContext(workDir: string): string[] {
           }
         }
       }
-    } catch { }
+    } catch {}
   }
 
   return files;
